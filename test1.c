@@ -10,6 +10,7 @@ uint8_t __attribute__((__noinline__)) foo(uint8_t n)
 
 void __attribute__((__section__(".text.entry"))) _start(void)
 {
+	*(volatile uint8_t *) 0xABEF = 27;
 	*(volatile uint8_t *) 0x100 = foo(5);
 	while(1)
 		;

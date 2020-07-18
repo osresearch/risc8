@@ -18,7 +18,7 @@ module top(
 	end
 
 	always begin
-		#1000
+		#10000
 		$finish;
 	end
 
@@ -26,7 +26,7 @@ module top(
 	reg [15:0] code[0:127];
 	reg [15:0] cdata;
 	wire [15:0] pc;
-	initial $readmemh("test1.hex", code);
+	initial $readmemh("test2.hex", code);
 /*
 	initial begin
 		code[0] <= 16'h0000;

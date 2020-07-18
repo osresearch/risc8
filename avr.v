@@ -22,6 +22,8 @@ module avr_cpu(
 	wire [15:0] reg_X = { regs[27], regs[26] };
 	wire [15:0] reg_Y = { regs[29], regs[28] };
 	wire [15:0] reg_Z = { regs[31], regs[30] };
+	reg [15:0] temp;
+	reg [15:0] next_temp;
 	reg [15:0] reg_PC;
 	reg [15:0] reg_SP;
 	reg [15:0] next_SP;
@@ -41,6 +43,7 @@ module avr_cpu(
 	// although sometimes it is the address for a LPM
 	assign pc = next_PC; // lpm_active ? addr : reg_PC;
 	reg [15:0] next_PC;
+	reg force_PC;
 
 	// Some instructions require an extra cycle;
 	// they will set cycle and re-use the previous opcode
@@ -168,10 +171,15 @@ module avr_cpu(
 		regs[31] <= 0;
 
 	end else begin
-		reg_PC <= next_PC;
+		// only advance the PC if we are not in
+		// a multi-cycle instruction and not a LPM
+		if (force_PC || next_cycle == 0)
+			reg_PC <= next_PC;
+
 		reg_SP <= next_SP;
 		cycle <= next_cycle;
 		skip <= next_skip;
+		temp <= next_temp;
 		prev_opcode <= opcode;
 		sreg <= next_sreg;
 
@@ -193,22 +201,24 @@ module avr_cpu(
 		endcase
 
 		if (invalid_op)
-			$display("%04x.%d %04x opcode %04x%s",
+			$display("%04x.%d: %04x%s%s",
 				reg_PC * 2,
 				cycle,
-				next_PC * 2,
 				opcode,
-				skip ? " SKIP" : ""
+				skip ? " SKIP" : "",
+				invalid_op ? " INVALID": ""
 			);
 	end
 
 	always @(*)
 	begin
 		{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg;
+		force_PC = 0;
 		next_PC = reg_PC + 1;
 		next_SP = reg_SP;
 		next_cycle = 0;
 		next_skip = 0;
+		next_temp = temp;
 
 		next_wdata = wdata;
 		next_addr = addr;
@@ -316,12 +326,12 @@ module avr_cpu(
 				SC = Rd7 & Rr7 | Rr7 & !R7 | !R7 & Rd7;
 			end
 		end
-		16'b000100_?_?????_????: if (!skip) begin
+		16'b0001_00??_????_????: if (!skip) begin
 			// CPSE Rd,Rr (no sreg updates)
 			if (alu_Rd == alu_Rr)
 				next_skip = 1;
 		end
-		16'b001000_?_?????_????: if (!skip) begin
+		16'b0010_00??_????_????: if (!skip) begin
 			// AND Rd,Rr
 			dest = DEST_RD;
 			R = alu_Rd & alu_Rr;
@@ -330,7 +340,7 @@ module avr_cpu(
 			SN = R7;
 			SZ = R == 0;
 		end
-		16'b001000_?_?????_????: if (!skip) begin
+		16'b0010_01??_????_????: if (!skip) begin
 			// EOR Rd,Rr
 			dest = DEST_RD;
 			R = alu_Rd ^ alu_Rr;
@@ -339,7 +349,7 @@ module avr_cpu(
 			SN = R7;
 			SZ = R == 0;
 		end
-		16'b001010_?_?????_????: if (!skip) begin
+		16'b0010_10??_????_????: if (!skip) begin
 			// OR Rd,Rr
 			dest = DEST_RD;
 			R = alu_Rd | alu_Rr;
@@ -348,7 +358,7 @@ module avr_cpu(
 			SN = R7;
 			SZ = R == 0;
 		end
-		16'b001011_?_?????_????: if (!skip) begin
+		16'b0010_11??_????_????: if (!skip) begin
 			// MOV Rd,Rr (no sreg updates)
 			dest = DEST_RD;
 			R = alu_Rr;
@@ -412,6 +422,7 @@ module avr_cpu(
 			// followed by 16-bit immediate SRAM address
 			if (cycle == 0) begin
 				// wait for the next read to get the address
+				force_PC = 1;
 				next_cycle = 1;
 			end else
 			if (cycle == 1) begin
@@ -419,7 +430,6 @@ module avr_cpu(
 				if (opcode[9] == 0) begin
 					// LDS: request a read of that address and wait at this PC
 					next_cycle = 2;
-					next_PC = reg_PC;
 					next_ren = 1;
 				end else begin
 					// STS: write to that address and go on
@@ -435,6 +445,7 @@ module avr_cpu(
 		end else begin
 			// need one extra cycle to read the extra word
 			if (cycle == 0) begin
+				force_PC = 1;
 				next_cycle = 1;
 				next_skip = 1;
 			end else begin
@@ -442,31 +453,51 @@ module avr_cpu(
 				next_skip = 0;
 			end
 		end
-		16'b1001_000?_????_11??: if (!skip) begin
+		16'b1001_000?_????_1100,
+		16'b1001_000?_????_1101,
+		16'b1001_000?_????_1110: if (!skip) begin
 			// LD Rd, X (no sreg update)
 			if (cycle == 0) begin
 				next_cycle = 1;
 				next_ren = 1;
-				if (opcode[1:0] == 0) begin
-					next_addr = reg_X;
-				end else
-				if (opcode[1:0] == 1) begin
+				case(opcode[1:0])
+				2'b00: next_addr = reg_X;
+				2'b01: begin
 					dest = DEST_X;
 					{ R1, R } = reg_X + 1;
 					next_addr = reg_X;
-				end else
-				if (opcode[1:0] == 2) begin
+				end
+				2'b10: begin
 					dest = DEST_X;
 					{ R1, R } = reg_X - 1;
 					next_addr = reg_X - 1;
-				end else begin
-					invalid_op = 1;
 				end
+				endcase
 			end else begin
-				next_cycle = 0;
 				dest = DEST_RD;
 				R = data_read;
 			end
+		end
+		16'b1001_001?_????_1100,
+		16'b1001_001?_????_1101,
+		16'b1001_001?_????_1110: if (!skip) begin
+			// ST Rd, X / -X / X+ (no sreg update)
+			next_wen = 1;
+			next_wdata = alu_Rd;
+
+			case(opcode[1:0])
+			2'b00: next_addr = reg_X;
+			2'b01: begin
+				dest = DEST_X;
+				{ R1, R } = reg_X + 1;
+				next_addr = reg_X;
+			end
+			2'b10: begin
+				dest = DEST_X;
+				{ R1, R } = reg_X - 1;
+				next_addr = reg_X - 1;
+			end
+			endcase
 		end
 		16'b10?0_??0?_????_0???: if (!skip) begin
 			// LD Rd, Z+Q (no status update)
@@ -475,7 +506,6 @@ module avr_cpu(
 				next_ren = 1;
 				next_addr = reg_Z + alu_Q;
 			end else begin
-				next_cycle = 0;
 				dest = DEST_RD;
 				R = data_read;
 			end
@@ -499,7 +529,6 @@ module avr_cpu(
 					invalid_op = 1;
 				end
 			end else begin
-				next_cycle = 0;
 				dest = DEST_RD;
 				R = data_read;
 			end
@@ -511,7 +540,6 @@ module avr_cpu(
 				next_addr = reg_Y + alu_Q;
 				next_ren = 1;
 			end else begin
-				next_cycle = 0;
 				dest = DEST_RD;
 				R = data_read;
 			end
@@ -520,9 +548,35 @@ module avr_cpu(
 			// LPM/ELPM Rd,Z
 			invalid_op = 1;
 		end
-		16'b1001000_?????_01_?_1: if (!skip) begin
-			// LPM/ELPM Rd,Z+
-			invalid_op = 1;
+		16'b1001_000?_????_0100,
+		16'b1001_000?_????_0101: if (!skip) begin
+			// LPM/ELPM Rd, Z / Z+
+			if (cycle == 0) begin
+				// start a read of the program memory space
+				// storing the real next PC into the temp reg
+				// PC is in words, not bytes
+				next_cycle = 1;
+				force_PC = 1;
+				next_PC = reg_Z >> 1;
+				next_temp = reg_PC;
+			end else
+			if (cycle == 1) begin
+				// store the correct byte of read data,
+				dest = DEST_RD;
+				R = reg_Z[0] ? cdata[15:8] : cdata[7:0];
+				next_cycle = 2;
+
+				// and return to the program flow by
+				// reading the temp reg.
+				next_PC = temp;
+				force_PC = 1;
+			end else begin
+				if(opcode[1:0] == 2'b01) begin
+					// Z+ addressing, 3 cycles
+					{ R1, R } = reg_Z + 1;
+					dest = DEST_Z;
+				end
+			end
 		end
 		16'b1001001_?????_0100: if (!skip) begin
 			// XCH Z,Rd
@@ -643,13 +697,12 @@ module avr_cpu(
 			end else
 			if (cycle == 1) begin
 				next_cycle = 2;
-				next_PC[15:8] = data_read;
+				next_temp[7:0] = data_read;
 				next_SP = reg_SP + 1;
 				next_addr = next_SP;
 				next_ren = 1;
 			end else begin
-				next_cycle = 0;
-				next_PC[7:0] = data_read;
+				next_PC = { temp[7:0], data_read };
 			end
 		end
 		16'b1001010100011000: if (!skip) begin
@@ -711,32 +764,42 @@ module avr_cpu(
 			// DES round k
 			invalid_op = 1;
 		end
-		16'b1001010_?????_11_?_1: if (!skip) begin
-			// JMP/CALL abs22
+
+		16'b1001_010?_????_111?: if (!skip) begin
+			// CALL abs22
 			// 16 bits in next word
 			if (cycle == 0) begin
 				next_cycle = 1;
-				// write the first half of the return address
+				force_PC = 1;
+			end else
+			if (cycle == 1) begin
+				// cdata now has the destination address
+				// start pushing next_PC
+				next_temp = cdata;
 				next_addr = reg_SP;
 				next_SP = reg_SP + 1;
-				next_wdata = reg_PC + 2;
+				next_wdata = next_PC[7:0];
 				next_wen = 1;
-			end else begin
-				next_PC = cdata;
-				next_cycle = 0;
+				next_cycle = 2;
+			end else
+			if (cycle == 2) begin
 				// write the second half of the return address
 				next_addr = reg_SP;
 				next_SP = reg_SP + 1;
-				next_wdata = reg_PC + 1;
+				next_wdata = next_PC[15:8];
 				next_wen = 1;
+				next_cycle = 3;
+			end else begin
+				// 22-bit PC has extra bits in opcode
+				// but we are a 16-bit PC CPU
+				next_PC = temp;
 			end
 		end else begin
 			// skip the read of the next word, do nothing
 			if (cycle == 0) begin
+				force_PC = 1;
 				next_skip = 1;
 				next_cycle = 1;
-			end else begin
-				next_cycle = 0;
 			end
 		end
 
@@ -760,9 +823,11 @@ module avr_cpu(
 			// MUL unsigned R1:R0 = Rr*Rd
 			invalid_op = 1;
 		end
-		16'b1011_?_??_?????_????: if (!skip) begin
-			// IN/OUT to IO space
-			invalid_op = 1;
+		16'b1011_1???_????_????: if (!skip) begin
+			// OUT to IO space (no sreg update)
+			next_addr = { 10'b10_0000_0000, opcode[14:13], opcode[3:0] };
+			next_wdata = alu_Rd;
+			next_wen = 1;
 		end
 		16'b1100_????????????: if (!skip) begin
 			// RJMP to PC + simm12
@@ -776,19 +841,18 @@ module avr_cpu(
 				next_addr = reg_SP;
 				next_SP = reg_SP - 1;
 				next_wdata = next_PC[7:0]; // pc + 1
-
-				// and cycle until the next half
 				next_cycle = 1;
-			end else begin
+			end else
+			if (cycle == 1) begin
 				// push the second half
 				next_wen = 1;
 				next_addr = reg_SP;
 				next_SP = reg_SP - 1;
-				next_wdata = reg_PC[15:8]; // pc is already plus 1
-
+				next_wdata = next_PC[15:8]; // pc + 1
+				next_cycle = 2;
+			end else begin
 				// and do the jump
-				next_PC = reg_PC + simm12; // pc is already plus 1
-				next_cycle = 0;
+				next_PC = reg_PC + simm12 + 1;
 			end
 		end
 		16'b1110_????_????_????: if (!skip) begin

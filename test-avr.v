@@ -41,12 +41,14 @@ module top(
 */
 
 	// data memory
+	localparam RAMBITS = 12;
+
 	wire [15:0] addr;
 	reg [7:0] rdata;
 	wire [7:0] wdata;
 	wire wen;
 	wire ren;
-	reg [7:0] ram[0:255];
+	reg [7:0] ram[0:(1 << RAMBITS)-1];
 
 	always @(posedge clk)
 		cdata <= code[pc];
@@ -55,12 +57,12 @@ module top(
 	begin
 		rdata <= ram[addr[7:0]];
 		if (ren) begin
-			$display("RD %04x => %02x", addr, ram[addr[7:0]]);
+			$display("RD %04x => %02x", addr, ram[addr[RAMBITS-1:0]]);
 		end
 
 		if (wen) begin
 			$display("WR %04x <= %02x", addr, wdata);
-			ram[addr[7:0]] <= wdata;
+			ram[addr[RAMBITS-1:0]] <= wdata;
 		end
 	end
 

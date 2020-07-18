@@ -19,14 +19,13 @@ module avr_cpu(
 );
 	// register file (as flops, not as BRAM)
 	reg [7:0] regs[31:0];
-	wire [15:0] reg_X = { regs[25], regs[24] };
+	wire [15:0] reg_X = { regs[27], regs[26] };
 	wire [15:0] reg_Y = { regs[29], regs[28] };
 	wire [15:0] reg_Z = { regs[31], regs[30] };
 	reg [15:0] reg_PC;
 	reg [15:0] reg_SP;
 	reg [15:0] next_SP;
 	reg [7:0] sreg;
-	reg [7:0] next_sreg;
 	localparam SREG_I = 7;
 	localparam SREG_T = 6;
 	localparam SREG_H = 5;
@@ -35,6 +34,8 @@ module avr_cpu(
 	localparam SREG_N = 2;
 	localparam SREG_Z = 1;
 	localparam SREG_C = 0;
+	reg SI, ST, SH, SS, SV, SN, SZ, SC;
+	wire [7:0] next_sreg = { SI, ST, SH, SS, SV, SN, SZ, SC };
 
 	// the PC output is almost always the actual PC,
 	// although sometimes it is the address for a LPM
@@ -67,47 +68,38 @@ module avr_cpu(
 	assign data_ren = next_ren;
 	assign data_write = next_wdata;
 
+	reg invalid_op;
 	reg [7:0] R;
-	reg [1:0] dest;
+	reg [7:0] R1;
+	reg [2:0] dest;
 	localparam DEST_RD = 1;
 	localparam DEST_RDI = 2;
+	localparam DEST_X = 3;
+	localparam DEST_Y = 4;
+	localparam DEST_Z = 5;
 
 
 	// ALU registers
-	wire [5:0] alu_r = { opcode[9], opcode[3:0] };
-	wire [5:0] alu_d = opcode[8:4];
-	wire [5:0] alu_di = { 1'b1, opcode[7:4] };
+	wire [5:0] alu_r = { opcode[9], opcode[3:0] }; // 0-31
+	wire [5:0] alu_d = opcode[8:4]; // 0-31
+	wire [5:0] alu_di = { 1'b1, opcode[7:4] }; // 16-31
 	wire [7:0] alu_Rr = regs[alu_r];
 	wire [7:0] alu_Rd = regs[alu_d];
-	wire [7:0] alu_K = { opcode[11:8], opcode[3:0] };
 	wire [7:0] alu_Rdi = regs[alu_di];
-
-	// two operand
-	wire [8:0] alu_SUB = alu_Rd - alu_Rr;
-	wire [8:0] alu_SBC = alu_Rd - alu_Rr - sreg[SREG_C];
-	wire [8:0] alu_ADD = alu_Rd + alu_Rr;
-	wire [8:0] alu_ADC = alu_Rd + alu_Rr + sreg[SREG_C];
-	wire [7:0] alu_EOR = alu_Rd ^ alu_Rr;
-	wire [7:0] alu_OR  = alu_Rd | alu_Rr;
-	wire [7:0] alu_AND = alu_Rd & alu_Rr;
-	wire [7:0] alu_LSL = { alu_Rd[6:0], 1'b0 };
-	wire [7:0] alu_ROL = { alu_Rd[6:0], sreg[SREG_C] };
+	wire [7:0] alu_K = { opcode[11:8], opcode[3:0] };
+	wire [5:0] alu_Q = { opcode[29], opcode[27:26], opcode[2:0] };
 
 	// helpers for computing sreg updates
+	wire Rdi3 = alu_Rdi[3];
+	wire Rdi7 = alu_Rdi[7];
 	wire Rd3 = alu_Rd[3];
-	wire Rr3 = alu_Rd[3];
 	wire Rd7 = alu_Rd[7];
-	wire Rr7 = alu_Rd[7];
+	wire Rr3 = alu_Rr[3];
+	wire Rr7 = alu_Rr[7];
 	wire K3 = alu_K[3];
 	wire K7 = alu_K[7];
 	wire R3 = R[3];
 	wire R7 = R[7];
-
-	// register-immediate operand
-	wire [7:0] alu_ANDI = alu_Rdi & alu_K;
-	wire [7:0] alu_ORI  = alu_Rdi | alu_K;
-	wire [8:0] alu_SUBI = alu_Rdi - alu_K;
-	wire [8:0] alu_SBCI = alu_Rdi - alu_K - sreg[SREG_C];
 
 	// sign extended 12-bit value
 	wire [15:0] simm12 = {
@@ -189,32 +181,32 @@ module avr_cpu(
 		wdata <= next_wdata;
 
 		case(dest)
-		DEST_RD: begin
-			$display("%04x: Rd %d = %02x", reg_PC*2, alu_d, R);
-			regs[alu_d] <= R;
-		end
-		DEST_RDI: begin
-			$display("%04x: Rdi %d = %02x", reg_PC*2, alu_di, R);
-			regs[alu_di] <= R;
-		end
+		0: begin /* Nothing */ end
+		DEST_RD: regs[alu_d] <= R;
+		DEST_RDI: regs[alu_di] <= R;
+		DEST_X: { regs[27], regs[26] } = { R1, R };
+		DEST_Y: { regs[29], regs[28] } = { R1, R };
+		DEST_Z: { regs[31], regs[30] } = { R1, R };
 		default: begin
-
-		$display("%04x.%d %04x opcode %04x%s",
-			reg_PC * 2,
-			cycle,
-			next_PC * 2,
-			opcode,
-			skip ? " SKIP" : ""
-		);
+			$display("unknown dest mode %x", dest);
 		end
 		endcase
+
+		if (invalid_op)
+			$display("%04x.%d %04x opcode %04x%s",
+				reg_PC * 2,
+				cycle,
+				next_PC * 2,
+				opcode,
+				skip ? " SKIP" : ""
+			);
 	end
 
 	always @(*)
 	begin
+		{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg;
 		next_PC = reg_PC + 1;
 		next_SP = reg_SP;
-		next_sreg = sreg;
 		next_cycle = 0;
 		next_skip = 0;
 
@@ -222,7 +214,8 @@ module avr_cpu(
 		next_addr = addr;
 		next_wen = 0;
 		next_ren = 0;
-	
+
+		invalid_op = 0;
 		R = 0;
 		dest = 0;
 
@@ -238,108 +231,179 @@ module avr_cpu(
 		end
 
 		// 2-operand instructions
-		16'b000_?_01_?_?????_????: if (!skip) begin
-			// CPC/CP Rd,Rr
+		16'b000_0_01_?_?????_????: if (!skip) begin
+			// CPC Rd,Rr (no dest, only sreg)
+			R = alu_Rd - alu_Rr - sreg[SREG_C];
+			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
+			SS = SN ^ SV;
+			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
+			SN = R7;
+			SZ = (R == 0) & sreg[SREG_Z];
+			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
+		end
+		16'b000_1_01_?_?????_????: if (!skip) begin
+			// CP Rd,Rr (no dest, only sreg)
+			R = alu_Rd - alu_Rr;
+			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
+			SS = SN ^ SV;
+			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
+			SN = R7;
+			SZ = R == 0;
+			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
 		end
 		16'b000010_?_?????_????: if (!skip) begin
 			// SBC Rd,Rr
 			dest = DEST_RD;
-			R = alu_SBC;
+			R = alu_Rd - alu_Rr - sreg[SREG_C];
+			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
+			SS = SN ^ SV;
+			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
+			SN = R7;
+			SZ = (R == 0) & sreg[SREG_Z];
+			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
 		end
 		16'b000110_?_?????_????: if (!skip) begin
 			// SUB Rd,Rr
 			dest = DEST_RD;
-			R = alu_SUB;
+			R = alu_Rd - alu_Rr;
+			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
+			SS = SN ^ SV;
+			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
+			SN = R7;
+			SZ = R == 0;
+			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
 		end
 		16'b000_0_11_?_?????_????: if (!skip) begin
-			// ADD Rd,Rr, LSL Rd when Rd=Rr
 			dest = DEST_RD;
 			if (alu_r == alu_d) begin
-				R = alu_LSL;
-				next_sreg[SREG_H] = Rd3;
-				next_sreg[SREG_S] = R7 ^ (R7 ^ Rd7); // N^V
-				next_sreg[SREG_V] = R7 ^ Rd7; // N^C
-				next_sreg[SREG_N] = R7;
-				next_sreg[SREG_Z] = R == 0;
-				next_sreg[SREG_C] = Rd7;
+				// LSL Rd when Rd=Rr
+				R = { alu_Rd[6:0], 1'b0 };
+				SH = Rd3;
+				SS = SN ^ SV; 
+				SV = SN ^ SC;
+				SN = R7;
+				SZ = R == 0;
+				SC = Rd7;
 			end else begin
-				R = alu_ADD;
-				next_sreg[SREG_H] = (Rd3 & Rr3) | (Rr3 & !R3) | (Rd3 & !R3);
-				next_sreg[SREG_S] = R7 ^ (R7 ^ Rd7); // N^V
-				next_sreg[SREG_V] = R7 ^ Rd7; // N^C
-				next_sreg[SREG_N] = R7;
-				next_sreg[SREG_Z] = R == 0;
-				next_sreg[SREG_C] = Rd7 & Rr7 | Rr7 & !R7 | Rd7 & !R7;
+				// ADD Rd,Rr
+				R = alu_Rd + alu_Rr;
+				SH = (Rd3 & Rr3) | (Rr3 & !R3) | (Rd3 & !R3);
+				SS = SN ^ SV;
+				SV = SN ^ SC;
+				SN = R7;
+				SZ = R == 0;
+				SC = Rd7 & Rr7 | Rr7 & !R7 | Rd7 & !R7;
 			end
 		end
 		16'b000_1_11_?_?????_????: if (!skip) begin
-			// ADC Rd,Rr, ROL Rd when Rd=Rr
 			dest = DEST_RD;
 			if (alu_r == alu_d) begin
-				R = alu_ROL;
+				// ROL Rd when Rd=Rr
+				R = { alu_Rd[6:0], sreg[SREG_C] };
+				SH = Rd3;
+				SS = SN ^ SV;
+				SV = SN ^ SC;
+				SZ = R == 0;
+				SC = Rd7;
 			end else begin
-				R = alu_ADC;
+				// ADC Rd,Rr
+				R = alu_Rd + alu_Rr + sreg[SREG_C];
+				SH = Rd3 & Rr3 | Rr3 & !R3 | !R3 & Rd3;
+				SS = SN ^ SV;
+				SV = Rd7 & Rr7 & !R7 | !Rd7 & !Rr7 & R7;
+				SN = R7;
+				SZ = R == 0;
+				SC = Rd7 & Rr7 | Rr7 & !R7 | !R7 & Rd7;
 			end
 		end
 		16'b000100_?_?????_????: if (!skip) begin
-			// CPSE Rd,Rr
+			// CPSE Rd,Rr (no sreg updates)
 			if (alu_Rd == alu_Rr)
 				next_skip = 1;
 		end
 		16'b001000_?_?????_????: if (!skip) begin
 			// AND Rd,Rr
 			dest = DEST_RD;
-			R = alu_AND;
-			next_sreg[SREG_S] = R7 ^ 0; // N^V
-			next_sreg[SREG_V] = 0;
-			next_sreg[SREG_N] = R7;
-			next_sreg[SREG_Z] = R == 0;
+			R = alu_Rd & alu_Rr;
+			SS = SN ^ SV;
+			SV = 0;
+			SN = R7;
+			SZ = R == 0;
 		end
 		16'b001000_?_?????_????: if (!skip) begin
 			// EOR Rd,Rr
 			dest = DEST_RD;
-			R = alu_EOR;
+			R = alu_Rd ^ alu_Rr;
+			SS = SN ^ SV;
+			SV = 0;
+			SN = R7;
+			SZ = R == 0;
 		end
 		16'b001010_?_?????_????: if (!skip) begin
 			// OR Rd,Rr
 			dest = DEST_RD;
-			R = alu_OR;
+			R = alu_Rd | alu_Rr;
+			SS = SN ^ SV;
+			SV = 0;
+			SN = R7;
+			SZ = R == 0;
 		end
 		16'b001011_?_?????_????: if (!skip) begin
-			// MOV Rd,Rr
+			// MOV Rd,Rr (no sreg updates)
 			dest = DEST_RD;
 			R = alu_Rr;
 		end
 
 		// Register-immediate operations
 		16'b0011_????_????_????: if (!skip) begin
-			// CPI Rd,K
+			// CPI Rd,K (only updates status register, so no dest)
+			R = alu_Rdi - alu_K;
+			SH = (K3 & !Rdi3) | (K3 & R3) | (R3 & !Rdi3);
+			SS = SN ^ SV;
+			SV = (Rdi7 & !K7 & !R7) | (K7 & R7 & !Rdi7);
+			SN = R7;
+			SZ = R == 0;
+			SC = (!Rdi7 & K7) | (K7 & R7) | (R7 & !Rdi7);
 		end
 		16'b0100_????_????_????: if (!skip) begin
 			// SBCI Rd, K
 			dest = DEST_RDI;
-			R = alu_SBCI;
+			R = alu_Rdi - alu_K - sreg[SREG_C];
+			SH = !Rdi3 & K3 | K3 & !R3 | R3 & !Rdi3;
+			SS = SN ^ SV;
+			SV = Rdi7 & !K7 & !R7 | !Rdi7 & K7 & R7;
+			SN = R7;
+			SZ = (R == 0) & sreg[SREG_Z];
+			SC = !Rdi7 & K7 | K7 & R7 | R7 & !Rdi7;
 		end
 		16'b0101_????_????_????: if (!skip) begin
 			// SUBI Rd, K
 			dest = DEST_RDI;
-			R = alu_SUBI;
-			next_sreg[SREG_H] = (K3 & !Rd3) | (K3 & R3) | (R3 & !Rd3);
-			next_sreg[SREG_S] = next_sreg[SREG_N] ^ next_sreg[SREG_V];
-			next_sreg[SREG_V] = (Rd7 & !K7 & !R7) | (K7 & R7 & !Rd7);
-			next_sreg[SREG_N] = R7;
-			next_sreg[SREG_Z] = R == 0;
-			next_sreg[SREG_C] = (!Rd7 & K7) | (K7 & R7) | (R7 & !Rd7);
+			R = alu_Rdi - alu_K;
+			SH = (K3 & !Rdi3) | (K3 & R3) | (R3 & !Rdi3);
+			SS = SN ^ SV;
+			SV = (Rdi7 & !K7 & !R7) | (K7 & R7 & !Rdi7);
+			SN = R7;
+			SZ = R == 0;
+			SC = (!Rdi7 & K7) | (K7 & R7) | (R7 & !Rdi7);
 		end
 		16'b0110_????_????_????: if (!skip) begin
 			// ORI Rd,K or SBR Rd, K
 			dest = DEST_RDI;
-			R = alu_ORI;
+			R = alu_Rdi | alu_K;
+			SS = SN ^ SV;
+			SV = 0;
+			SN = R7;
+			SZ = R == 0;
 		end
 		16'b0111_????_????_????: if (!skip) begin
 			// ANDI Rd,K or CBR Rd, K
 			dest = DEST_RDI;
-			R = alu_ANDI;
+			R = alu_Rdi & alu_K;
+			SS = SN ^ SV;
+			SV = 0;
+			SN = R7;
+			SZ = R == 0;
 		end
 
 		// Load-store instructions
@@ -378,70 +442,194 @@ module avr_cpu(
 				next_skip = 0;
 			end
 		end
-		16'b100100_?_?????_?_001: if (!skip) begin
-			// LD/ST Rd through Z+/Y+
+		16'b1001_000?_????_11??: if (!skip) begin
+			// LD Rd, X (no sreg update)
+			if (cycle == 0) begin
+				next_cycle = 1;
+				next_ren = 1;
+				if (opcode[1:0] == 0) begin
+					next_addr = reg_X;
+				end else
+				if (opcode[1:0] == 1) begin
+					dest = DEST_X;
+					{ R1, R } = reg_X + 1;
+					next_addr = reg_X;
+				end else
+				if (opcode[1:0] == 2) begin
+					dest = DEST_X;
+					{ R1, R } = reg_X - 1;
+					next_addr = reg_X - 1;
+				end else begin
+					invalid_op = 1;
+				end
+			end else begin
+				next_cycle = 0;
+				dest = DEST_RD;
+				R = data_read;
+			end
 		end
-		16'b100100_?_?????_?_010: if (!skip) begin
-			// LD/ST Rd through -Z/-Y
+		16'b10?0_??0?_????_0???: if (!skip) begin
+			// LD Rd, Z+Q (no status update)
+			if (cycle == 0) begin
+				next_cycle = 1;
+				next_ren = 1;
+				next_addr = reg_Z + alu_Q;
+			end else begin
+				next_cycle = 0;
+				dest = DEST_RD;
+				R = data_read;
+			end
+		end
+		16'b1001_000?_????_0001,
+		16'b1001_000?_????_0010: if (!skip) begin
+			// LD Rd, -Z / Z+ (no sreg update)
+			if (cycle == 0) begin
+				next_cycle = 1;
+				next_ren = 1;
+				if (opcode[1:0] == 1) begin
+					dest = DEST_Z;
+					{ R1, R } = reg_Z + 1;
+					next_addr = reg_Z;
+				end else
+				if (opcode[1:0] == 2) begin
+					dest = DEST_Z;
+					{ R1, R } = reg_Z - 1;
+					next_addr = reg_X - 1;
+				end else begin
+					invalid_op = 1;
+				end
+			end else begin
+				next_cycle = 0;
+				dest = DEST_RD;
+				R = data_read;
+			end
+		end
+		16'b10?0_??0?_????_1???: if (!skip) begin
+			// LD Rd, Y+Q (no sreg update)
+			if (cycle == 0) begin
+				next_cycle = 1;
+				next_addr = reg_Y + alu_Q;
+				next_ren = 1;
+			end else begin
+				next_cycle = 0;
+				dest = DEST_RD;
+				R = data_read;
+			end
 		end
 		16'b1001000_?????_01_?_0: if (!skip) begin
 			// LPM/ELPM Rd,Z
+			invalid_op = 1;
 		end
 		16'b1001000_?????_01_?_1: if (!skip) begin
 			// LPM/ELPM Rd,Z+
+			invalid_op = 1;
 		end
 		16'b1001001_?????_0100: if (!skip) begin
 			// XCH Z,Rd
+			invalid_op = 1;
 		end
 		16'b1001001_?????_0101: if (!skip) begin
 			// LAS Z,Rd
+			invalid_op = 1;
 		end
 		16'b1001001_?????_0110: if (!skip) begin
 			// LAC Z,Rd
+			invalid_op = 1;
 		end
 		16'b1001001_?????_0111: if (!skip) begin
 			// LAT Z,Rd
+			invalid_op = 1;
 		end
 		16'b1001001_?????_1100: if (!skip) begin
 			// LD/ST Rd through X
+			invalid_op = 1;
 		end
 		16'b1001001_?????_1101: if (!skip) begin
 			// LD/ST Rd through X+
+			invalid_op = 1;
 		end
 		16'b1001001_?????_1110: if (!skip) begin
 			// LD/ST Rd through -X
+			invalid_op = 1;
 		end
 		16'b1001001_?????_1111: if (!skip) begin
 			// POP/PUSH Rd
+			invalid_op = 1;
 		end
 
 		// One operand instructions
 		16'b1001010_?????_0000: if (!skip) begin
 			// COM Rd
+			dest = DEST_RD;
+			R = 8'hFF - alu_Rd;
+			SS = SN ^ SV;
+			SV = 0;
+			SN = R7;
+			SZ = R == 0;
+			SC = 1;
 		end
 		16'b1001010_?????_0001: if (!skip) begin
 			// NEG Rd
+			dest = DEST_RD;
+			R = 8'h00 - alu_Rd;
+			SH = R3 | !Rd3;
+			SS = SN ^ SV;
+			SV = R7 && (R[6:0] == 0);
+			SN = R7;
+			SZ = R == 0;
+			SC = R != 0;
 		end
 		16'b1001010_?????_0010: if (!skip) begin
-			// SWAP Rd
+			// SWAP Rd, no sreg updates
+			dest = DEST_RD;
+			R = { alu_Rd[3:0], alu_Rd[7:4] };
 		end
 		16'b1001010_?????_0011: if (!skip) begin
 			// INC Rd
+			dest = DEST_RD;
+			R = alu_Rd + 1;
+			SS = SN ^ SV;
+			SV = R7 & (R[6:0] == 0);
+			SN = R7;
+			SZ = R == 0;
 		end
 		16'b1001010_?????_0100: if (!skip) begin
 			// RESERVED
+			invalid_op = 1;
 		end
 		16'b1001010_?????_0101: if (!skip) begin
 			// ASR Rd
+			dest = DEST_RD;
+			R = { alu_Rd[7], alu_Rd[7:1] };
+			SS = SN ^ SV;
+			SV = SN ^ SC;
+			SN = R7;
+			SZ = R == 0;
+			SC = alu_Rd[0];
 		end
 		16'b1001010_?????_0110: if (!skip) begin
 			// LSR Rd
+			dest = DEST_RD;
+			R = { 1'b0, alu_Rd[7:1] };
+			SS = SN ^ SV;
+			SV = SN ^ SC;
+			SN = 0;
+			SZ = R == 0;
+			SC = alu_Rd[0];
 		end
 		16'b1001010_?????_0111: if (!skip) begin
 			// ROR Rd
+			dest = DEST_RD;
+			R = { sreg[SREG_C], alu_Rd[7:1] };
+			SS = SN ^ SV;
+			SV = SN ^ SC;
+			SN = R7;
+			SZ = R == 0;
+			SC = alu_Rd[0];
 		end
 		16'b10010100_?_???_1000: if (!skip) begin
 			// SEx/CLx Status register clear/set bit
+			invalid_op = 1;
 		end
 
 		// Zero-operand instructions
@@ -452,7 +640,6 @@ module avr_cpu(
 				next_SP = reg_SP + 1;
 				next_addr = next_SP;
 				next_ren = 1;
-				$display("%d read PC <= %04x", cycle, next_addr);
 			end else
 			if (cycle == 1) begin
 				next_cycle = 2;
@@ -460,55 +647,69 @@ module avr_cpu(
 				next_SP = reg_SP + 1;
 				next_addr = next_SP;
 				next_ren = 1;
-				$display("%d next PC high = %02x", cycle, data_read);
 			end else begin
 				next_cycle = 0;
 				next_PC[7:0] = data_read;
-				$display("%d next PC low = %02x", cycle, data_read);
 			end
 		end
 		16'b1001010100011000: if (!skip) begin
 			// RETI
+			invalid_op = 1;
 		end
 		16'b10010101001x1000: if (!skip) begin
 			// RESERVED
+			invalid_op = 1;
 		end
 		16'b1001010101??1000: if (!skip) begin
 			// RESERVED
+			invalid_op = 1;
 		end
 		16'b1001010110001000: if (!skip) begin
 			// SLEEP
+			invalid_op = 1;
 		end
 		16'b1001010110011000: if (!skip) begin
 			// BREAK
+			invalid_op = 1;
 		end
 		16'b1001010110101000: if (!skip) begin
 			// WDR
+			invalid_op = 1;
 		end
 		16'b1001010110111000: if (!skip) begin
 			// RESERVED
+			invalid_op = 1;
 		end
 		16'b10010101110_?_1000: if (!skip) begin
 			// LPM/ELPM
+			invalid_op = 1;
 		end
 		16'b1001010111101000: if (!skip) begin
 			// SPM
+			invalid_op = 1;
 		end
 		16'b1001010111111000: if (!skip) begin
 			// SPM X+
+			invalid_op = 1;
 		end
 
 		// misc instructions
 		16'b1001010_?_000_?_1001: if (!skip) begin
 			// Indirect jump/call to Z or EIND:Z
+			invalid_op = 1;
 		end
 		16'b1001010_?????_1010: if (!skip) begin
 			// DEC Rd
 			dest = DEST_RD;
 			R = alu_Rd - 1;
+			SS = SN ^ SV;
+			SV = !R7 & (R[6:0] != 0);
+			SN = R7;
+			SZ = R == 0;
 		end
 		16'b10010100_????_1011: if (!skip) begin
 			// DES round k
+			invalid_op = 1;
 		end
 		16'b1001010_?????_11_?_1: if (!skip) begin
 			// JMP/CALL abs22
@@ -541,21 +742,27 @@ module avr_cpu(
 
 		16'b10010110_??_??_????: if (!skip) begin
 			// ADIW Rp, uimm6
+			invalid_op = 1;
 		end
 		16'b10010111_??_??_????: if (!skip) begin
 			// SBIW Rp, uimm6
+			invalid_op = 1;
 		end
 		16'b100110_?_0_?????_???: if (!skip) begin
 			// CBI/SBI a,b (clear/set IO bit)
+			invalid_op = 1;
 		end
 		16'b100110_?_1_?????_???: if (!skip) begin
 			// SBIC/SBIS a,b (IO bit test)
+			invalid_op = 1;
 		end
 		16'b100111_?_?????_????: if (!skip) begin
 			// MUL unsigned R1:R0 = Rr*Rd
+			invalid_op = 1;
 		end
 		16'b1011_?_??_?????_????: if (!skip) begin
 			// IN/OUT to IO space
+			invalid_op = 1;
 		end
 		16'b1100_????????????: if (!skip) begin
 			// RJMP to PC + simm12
@@ -585,7 +792,7 @@ module avr_cpu(
 			end
 		end
 		16'b1110_????_????_????: if (!skip) begin
-			// LDI Rd, K
+			// LDI Rd, K (no sreg updates)
 			dest = DEST_RDI;
 			R = alu_K;
 		end
@@ -601,14 +808,18 @@ module avr_cpu(
 		end
 		16'b111110_?_?????_0_???: if (!skip) begin
 			// BLD/BST register bit to STATUS.T
+			invalid_op = 1;
 		end
 		16'b111111_?_?????_0_???: if (!skip) begin
 			// SBRC/SBRS skip if register bit b equals B
+			invalid_op = 1;
 		end
 		16'b11111_??_?????_1_???: if (!skip) begin
 			// RESERVED
+			invalid_op = 1;
 		end
 		default: begin
+			invalid_op = 1;
 		end
 		endcase
 	end

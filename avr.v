@@ -18,10 +18,13 @@ module avr_cpu(
 	output [7:0] data_write
 );
 	// register file (as flops, not as BRAM)
+	localparam BASE_X = 26;
+	localparam BASE_Y = 28;
+	localparam BASE_Z = 30;
 	reg [7:0] regs[31:0];
-	wire [15:0] reg_X = { regs[27], regs[26] };
-	wire [15:0] reg_Y = { regs[29], regs[28] };
-	wire [15:0] reg_Z = { regs[31], regs[30] };
+	wire [15:0] reg_X = { regs[BASE_X+1], regs[BASE_X] };
+	wire [15:0] reg_Y = { regs[BASE_Y+1], regs[BASE_Y] };
+	wire [15:0] reg_Z = { regs[BASE_Z+1], regs[BASE_Z] };
 	reg [15:0] temp;
 	reg [15:0] next_temp;
 	reg [15:0] reg_PC;
@@ -74,13 +77,12 @@ module avr_cpu(
 	reg invalid_op;
 	reg [7:0] R;
 	reg [7:0] R1;
-	reg [2:0] dest;
+	reg [1:0] dest;
+	reg [5:0] dest_base;
+	localparam DEST_NONE = 0;
 	localparam DEST_RD = 1;
 	localparam DEST_RDI = 2;
-	localparam DEST_X = 3;
-	localparam DEST_Y = 4;
-	localparam DEST_Z = 5;
-
+	localparam DEST_WORD = 3;
 
 	// ALU registers
 	wire [5:0] alu_r = { opcode[9], opcode[3:0] }; // 0-31
@@ -126,6 +128,9 @@ module avr_cpu(
 		opcode[9],
 		opcode[9:3]
 	};
+
+	// immediate word 6-bit values
+	wire [5:0] immw6 = { opcode[7:6], opcode[3:0] };
 
 	always @(posedge clk) if (reset) begin
 		cycle <= 0;
@@ -192,11 +197,9 @@ module avr_cpu(
 		0: begin /* Nothing */ end
 		DEST_RD: regs[alu_d] <= R;
 		DEST_RDI: regs[alu_di] <= R;
-		DEST_X: { regs[27], regs[26] } = { R1, R };
-		DEST_Y: { regs[29], regs[28] } = { R1, R };
-		DEST_Z: { regs[31], regs[30] } = { R1, R };
-		default: begin
-			$display("unknown dest mode %x", dest);
+		DEST_WORD: begin
+			regs[dest_base | 0] <= R;
+			regs[dest_base | 1] <= R1;
 		end
 		endcase
 
@@ -228,6 +231,7 @@ module avr_cpu(
 		invalid_op = 0;
 		R = 0;
 		dest = 0;
+		dest_base = 0;
 
 		casez(opcode)
 		16'b0000000000000000: if (!skip) begin
@@ -235,6 +239,10 @@ module avr_cpu(
 		end
 		16'b00000001_????_????: if (!skip) begin
 			// MOVW Rd,Rr Move register pair
+			dest = DEST_WORD;
+			dest_base = { opcode[7:4], 1'b0 };
+			R1 = regs[{opcode[3:0], 1'b1 }];
+			R = regs[{opcode[3:0], 1'b0 }];
 		end
 		16'b0000_0011_0???_1???: if (!skip) begin
 			// MUL and FMUL, unimplemented
@@ -472,13 +480,15 @@ module avr_cpu(
 				2'b00: next_addr = reg_X;
 				2'b01: begin
 					// post-increment
-					dest = DEST_X;
+					dest = DEST_WORD;
+					dest_base = BASE_X;
 					{ R1, R } = reg_X + 1;
 					next_addr = reg_X;
 				end
 				2'b10: begin
 					// pre-decrement
-					dest = DEST_X;
+					dest = DEST_WORD;
+					dest_base = BASE_X;
 					{ R1, R } = reg_X - 1;
 					next_addr = reg_X - 1;
 				end
@@ -511,13 +521,15 @@ module avr_cpu(
 				case(opcode[1:0])
 				2'b01: begin
 					// post increment
-					dest = DEST_Z;
+					dest = DEST_WORD;
+					dest_base = BASE_Z;
 					{ R1, R } = reg_Z + 1;
 					next_addr = reg_Z;
 				end
 				2'b10: begin
 					// predecrement
-					dest = DEST_Z;
+					dest = DEST_WORD;
+					dest_base = BASE_Z;
 					{ R1, R } = reg_Z - 1;
 					next_addr = reg_X - 1;
 				end
@@ -567,7 +579,8 @@ module avr_cpu(
 			end else begin
 				if(opcode[1:0] == 2'b01) begin
 					// Z+ addressing, 3 cycles
-					dest = DEST_Z;
+					dest = DEST_WORD;
+					dest_base = BASE_Z;
 					{ R1, R } = reg_Z + 1;
 				end
 			end
@@ -787,7 +800,14 @@ module avr_cpu(
 
 		16'b10010110_??_??_????: if (!skip) begin
 			// ADIW Rp, uimm6
-			invalid_op = 1;
+			dest = DEST_WORD;
+			dest_base = { opcode[5:4], 3'b000 };
+			{R1,R} = { regs[dest_base|1], regs[dest_base] } + immw6;
+			SS = SN^SV;
+			SV = !regs[dest_base|1][7] & R1[7]; // !Rdh7 & R15
+			SN = R1[7]; // R15
+			SZ = { R1, R } == 0;
+			SC = !R1[7] & regs[dest_base|1][7]; // Rdh7
 		end
 		16'b10010111_??_??_????: if (!skip) begin
 			// SBIW Rp, uimm6

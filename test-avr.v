@@ -22,11 +22,14 @@ module top(
 		$finish;
 	end
 
+	localparam RAMBITS = 12;
+	localparam CODEBITS = 10;
+
 	// code memory
-	reg [15:0] code[0:127];
+	reg [15:0] code[0:(1 << CODEBITS) - 1];
 	reg [15:0] cdata;
 	wire [15:0] pc;
-	initial $readmemh("test3.hex", code);
+	initial $readmemh("test4.hex", code);
 /*
 	initial begin
 		code[0] <= 16'h0000;
@@ -41,28 +44,44 @@ module top(
 */
 
 	// data memory
-	localparam RAMBITS = 12;
 
 	wire [15:0] addr;
-	reg [7:0] rdata;
+	wire ram_sel = addr[15] == 0;
+	wire io_sel = addr[15] == 1;
+	reg [15:0] ram_data;
+	reg [15:0] io_data;
+	wire [7:0] rdata = ram_sel ? ram_data : io_sel ? io_data : 8'h00;
 	wire [7:0] wdata;
 	wire wen;
 	wire ren;
 	reg [7:0] ram[0:(1 << RAMBITS)-1];
 
+	initial $readmemh("zero.hex", ram);
+
 	always @(posedge clk)
-		cdata <= code[pc];
+		cdata <= code[pc[CODEBITS-1:0]];
 
 	always @(posedge clk)
 	begin
-		rdata <= ram[addr[7:0]];
-		if (ren) begin
+		ram_data <= ram[addr[RAMBITS-1:0]];
+		if (ren && ram_sel) begin
 			$display("RD %04x => %02x", addr, ram[addr[RAMBITS-1:0]]);
 		end
 
-		if (wen) begin
+		if (wen && ram_sel) begin
 			$display("WR %04x <= %02x", addr, wdata);
 			ram[addr[RAMBITS-1:0]] <= wdata;
+		end
+	end
+
+	reg [7:0] counter = 0;
+	always @(posedge clk)
+	begin
+		counter <= counter + 1;
+		if (ren && io_sel)
+			io_data <= counter;
+		if (wen && io_sel) begin
+			$display("IO %04x <= %02x", addr, wdata);
 		end
 	end
 

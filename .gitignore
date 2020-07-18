@@ -1,0 +1,11 @@
+*.o
+*.elf
+*.hex
+*.bin
+*.bit
+*.vvp
+*.asc
+*.json
+*.vcd
+.*.d
+.*.swp

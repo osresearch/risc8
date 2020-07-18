@@ -435,10 +435,9 @@ module avr_cpu(
 					// STS: write to that address and go on
 					next_wdata = regs[alu_d];
 					next_wen = 1;
-					next_cycle = 0;
 				end
 			end else begin
-				// load the register from the data read from RAM
+				// only LDS
 				dest = DEST_RD;
 				R = data_read;
 			end
@@ -453,52 +452,44 @@ module avr_cpu(
 				next_skip = 0;
 			end
 		end
-		16'b1001_000?_????_1100,
-		16'b1001_000?_????_1101,
-		16'b1001_000?_????_1110: if (!skip) begin
-			// LD Rd, X (no sreg update)
+
+		16'b1001_00??_????_1100,
+		16'b1001_00??_????_1101,
+		16'b1001_00??_????_1110: if (!skip) begin
+			// ST / LD Rd, X / X- / X+ (no sreg update)
 			if (cycle == 0) begin
-				next_cycle = 1;
-				next_ren = 1;
+				if (opcode[9]) begin
+					// STS
+					next_wen = 1;
+					next_wdata = alu_Rd;
+				end else begin
+					// LD
+					next_ren = 1;
+					next_cycle = 1;
+				end
+
 				case(opcode[1:0])
 				2'b00: next_addr = reg_X;
 				2'b01: begin
+					// post-increment
 					dest = DEST_X;
 					{ R1, R } = reg_X + 1;
 					next_addr = reg_X;
 				end
 				2'b10: begin
+					// pre-decrement
 					dest = DEST_X;
 					{ R1, R } = reg_X - 1;
 					next_addr = reg_X - 1;
 				end
 				endcase
 			end else begin
+				// extra cycle only for LD
 				dest = DEST_RD;
 				R = data_read;
 			end
 		end
-		16'b1001_001?_????_1100,
-		16'b1001_001?_????_1101,
-		16'b1001_001?_????_1110: if (!skip) begin
-			// ST Rd, X / -X / X+ (no sreg update)
-			next_wen = 1;
-			next_wdata = alu_Rd;
 
-			case(opcode[1:0])
-			2'b00: next_addr = reg_X;
-			2'b01: begin
-				dest = DEST_X;
-				{ R1, R } = reg_X + 1;
-				next_addr = reg_X;
-			end
-			2'b10: begin
-				dest = DEST_X;
-				{ R1, R } = reg_X - 1;
-				next_addr = reg_X - 1;
-			end
-			endcase
-		end
 		16'b10?0_??0?_????_0???: if (!skip) begin
 			// LD Rd, Z+Q (no status update)
 			if (cycle == 0) begin
@@ -510,29 +501,34 @@ module avr_cpu(
 				R = data_read;
 			end
 		end
+
 		16'b1001_000?_????_0001,
 		16'b1001_000?_????_0010: if (!skip) begin
 			// LD Rd, -Z / Z+ (no sreg update)
 			if (cycle == 0) begin
 				next_cycle = 1;
 				next_ren = 1;
-				if (opcode[1:0] == 1) begin
+				case(opcode[1:0])
+				2'b01: begin
+					// post increment
 					dest = DEST_Z;
 					{ R1, R } = reg_Z + 1;
 					next_addr = reg_Z;
-				end else
-				if (opcode[1:0] == 2) begin
+				end
+				2'b10: begin
+					// predecrement
 					dest = DEST_Z;
 					{ R1, R } = reg_Z - 1;
 					next_addr = reg_X - 1;
-				end else begin
-					invalid_op = 1;
 				end
+				default: invalid_op = 1;
+				endcase
 			end else begin
 				dest = DEST_RD;
 				R = data_read;
 			end
 		end
+
 		16'b10?0_??0?_????_1???: if (!skip) begin
 			// LD Rd, Y+Q (no sreg update)
 			if (cycle == 0) begin
@@ -544,10 +540,7 @@ module avr_cpu(
 				R = data_read;
 			end
 		end
-		16'b1001000_?????_01_?_0: if (!skip) begin
-			// LPM/ELPM Rd,Z
-			invalid_op = 1;
-		end
+
 		16'b1001_000?_????_0100,
 		16'b1001_000?_????_0101: if (!skip) begin
 			// LPM/ELPM Rd, Z / Z+
@@ -562,6 +555,7 @@ module avr_cpu(
 			end else
 			if (cycle == 1) begin
 				// store the correct byte of read data,
+				// based on the bottom bit of Z
 				dest = DEST_RD;
 				R = reg_Z[0] ? cdata[15:8] : cdata[7:0];
 				next_cycle = 2;
@@ -573,8 +567,8 @@ module avr_cpu(
 			end else begin
 				if(opcode[1:0] == 2'b01) begin
 					// Z+ addressing, 3 cycles
-					{ R1, R } = reg_Z + 1;
 					dest = DEST_Z;
+					{ R1, R } = reg_Z + 1;
 				end
 			end
 		end
@@ -592,18 +586,6 @@ module avr_cpu(
 		end
 		16'b1001001_?????_0111: if (!skip) begin
 			// LAT Z,Rd
-			invalid_op = 1;
-		end
-		16'b1001001_?????_1100: if (!skip) begin
-			// LD/ST Rd through X
-			invalid_op = 1;
-		end
-		16'b1001001_?????_1101: if (!skip) begin
-			// LD/ST Rd through X+
-			invalid_op = 1;
-		end
-		16'b1001001_?????_1110: if (!skip) begin
-			// LD/ST Rd through -X
 			invalid_op = 1;
 		end
 		16'b1001001_?????_1111: if (!skip) begin

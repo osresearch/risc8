@@ -1,5 +1,5 @@
 `default_nettype none
-`define AVR_PROGRAM "test4.hex"
+`define AVR_PROGRAM "blink.hex"
 `include "soc.v"
 
 module top(
@@ -17,7 +17,10 @@ module top(
 		.CLKHFEN(1'b1),
 		.CLKHF(clk_48)
 	);
-	wire clk = clk_48;
+	reg [2:0] clk_div;
+	always @(posedge clk_48)
+		clk_div <= clk_div + 1;
+	wire clk = clk_div[2];
 
 	assign led_r = ~port_b[0];
 	assign led_g = ~port_b[1];

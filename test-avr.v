@@ -1,6 +1,6 @@
 `default_nettype none
 
-`define AVR_PROGRAM "test4.hex"
+`define AVR_PROGRAM "blink.hex"
 
 `include "soc.v"
 
@@ -29,8 +29,8 @@ module top(
 	wire [7:0] ddr_b;
 	reg [7:0] pin_b;
 
-	always @(posedge clk)
-		$display("PORTB %02x", port_b);
+	//always @(posedge clk)
+		//$display("PORTB %02x", port_b);
 
 	avr_soc cpu(
 		.clk(clk),

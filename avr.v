@@ -22,6 +22,7 @@ module avr_cpu(
 	localparam BASE_Y = 28;
 	localparam BASE_Z = 30;
 	reg [7:0] regs[31:0];
+	//reg [7:0] regs[31:16];
 	wire [15:0] reg_X = { regs[BASE_X+1], regs[BASE_X] };
 	wire [15:0] reg_Y = { regs[BASE_Y+1], regs[BASE_Y] };
 	wire [15:0] reg_Z = { regs[BASE_Z+1], regs[BASE_Z] };
@@ -108,6 +109,9 @@ module avr_cpu(
 
 	// IN and OUT instructions
 	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
+
+	// LD vs ST is in the 9th bit
+	wire is_store = opcode[9];
 
 	// sign extended 12-bit value
 	wire [15:0] simm12 = {
@@ -231,6 +235,7 @@ module avr_cpu(
 		end
 		16'b0000_0011_0???_1???: begin
 			// MUL and FMUL, unimplemented
+			invalid_op = 1;
 		end
 
 		// 2-operand instructions
@@ -419,16 +424,16 @@ module avr_cpu(
 			end
 			2'b01: begin
 				next_addr = cdata;
-				if (opcode[9] == 0) begin
-					// LDS: request a read of the addr
-					// wait at this PC
-					next_cycle = 2;
-					next_ren = 1;
-				end else begin
+				if (is_store) begin
 					// STS: write to that address
 					// no extra cycle required
 					next_wdata = regs[alu_d];
 					next_wen = 1;
+				end else begin
+					// LDS: request a read of the addr
+					// wait at this PC
+					next_cycle = 2;
+					next_ren = 1;
 				end
 			end
 			2'b10: begin
@@ -444,7 +449,7 @@ module avr_cpu(
 			// ST / LD Rd, X / X- / X+ (no sreg update)
 			case(cycle)
 			2'b00: begin
-				if (opcode[9]) begin
+				if (is_store) begin
 					// STS (no extra cycle needed)
 					next_wen = 1;
 					next_wdata = alu_Rd;
@@ -483,7 +488,7 @@ module avr_cpu(
 		16'b10?0_????_????_0???:
 			case(cycle)
 			2'b00: begin
-				if (opcode[9]) begin
+				if (is_store) begin
 					// ST instruction
 					next_wen = 1;
 					next_wdata = alu_Rd;
@@ -506,7 +511,7 @@ module avr_cpu(
 		16'b1001_00??_????_0010:
 			case(cycle)
 			2'b00: begin
-				if (opcode[9]) begin
+				if (is_store) begin
 					// ST instruction
 					next_wen = 1;
 					next_wdata = alu_Rd;
@@ -539,13 +544,21 @@ module avr_cpu(
 			end
 			endcase
 
-		// LD Rd, Y+Q (no sreg update)
-		16'b10?0_??0?_????_1???:
+		// ST / LD Rd, Y+Q (no sreg update)
+		16'b10?0_????_????_1???:
 			case(cycle)
 			2'b00: begin
-				next_cycle = 1;
+				if (is_store) begin
+					// ST instruction
+					next_wen = 1;
+					next_wdata = alu_Rd;
+				end else begin
+					// LD instruction
+					next_cycle = 1;
+					next_ren = 1;
+				end
+
 				next_addr = reg_Y + alu_Q;
-				next_ren = 1;
 			end
 			2'b01: begin
 				dest = DEST_RD;
@@ -701,6 +714,7 @@ module avr_cpu(
 
 		// CLx Status register clear bit
 		16'b1001_0100_1???_1000: begin
+			(* full_case *)
 			case(opcode[6:4])
 			3'b000: SC = 0;
 			3'b001: SZ = 0;
@@ -715,6 +729,7 @@ module avr_cpu(
 
 		// CLx Status register clear bit
 		16'b1001_0100_0???_1000: begin
+			(* full_case *)
 			case(opcode[6:4])
 			3'b000: SC = 1;
 			3'b001: SZ = 1;
@@ -733,13 +748,13 @@ module avr_cpu(
 		16'b1001010100001000:
 			case(cycle)
 			2'b00: begin
-				next_cycle = 1;
+				next_cycle = cycle + 1;
 				next_SP = reg_SP + 1;
 				next_addr = next_SP;
 				next_ren = 1;
 			end
 			2'b01: begin
-				next_cycle = 2;
+				next_cycle = cycle + 1;
 				next_temp[7:0] = data_read;
 				next_SP = reg_SP + 1;
 				next_addr = next_SP;

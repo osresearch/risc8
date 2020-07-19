@@ -30,27 +30,15 @@ module top(
 	reg [15:0] cdata;
 	wire [15:0] pc;
 	initial $readmemh("test4.hex", code);
-/*
-	initial begin
-		code[0] <= 16'h0000;
-		code[1] <= 16'he011;
-		code[2] <= 16'he019;
-		code[3] <= 16'he022;
-		code[4] <= 16'he033;
-		code[5] <= 16'he044;
-		code[6] <= 16'h5042;
-		code[7] <= 16'h1b43;
-	end
-*/
+
+	always @(posedge clk)
+		cdata <= code[pc[CODEBITS-1:0]];
+
 
 	// data memory
 
 	wire [15:0] addr;
-	wire ram_sel = addr[15] == 0;
-	wire io_sel = addr[15] == 1;
-	reg [15:0] ram_data;
-	reg [15:0] io_data;
-	wire [7:0] rdata = ram_sel ? ram_data : io_sel ? io_data : 8'h00;
+	reg [7:0] ram_rdata;
 	wire [7:0] wdata;
 	wire wen;
 	wire ren;
@@ -58,31 +46,48 @@ module top(
 
 	initial $readmemh("zero.hex", ram);
 
-	always @(posedge clk)
-		cdata <= code[pc[CODEBITS-1:0]];
-
+	// the RAM is clocked logic for reads and writes
+	// it shadows the IO memory space below 64 bytes
 	always @(posedge clk)
 	begin
-		ram_data <= ram[addr[RAMBITS-1:0]];
-		if (ren && ram_sel) begin
+		ram_rdata <= ram[addr[RAMBITS-1:0]];
+		if (ren) begin
 			$display("RD %04x => %02x", addr, ram[addr[RAMBITS-1:0]]);
 		end
 
-		if (wen && ram_sel) begin
+		if (wen) begin
 			$display("WR %04x <= %02x", addr, wdata);
 			ram[addr[RAMBITS-1:0]] <= wdata;
 		end
 	end
 
-	reg [7:0] counter = 0;
-	always @(posedge clk)
-	begin
-		counter <= counter + 1;
-		if (ren && io_sel)
-			io_data <= counter;
+	// IO mapped peripherals are at the bottom 64-bytes of RAM
+	// and require continuous assignment
+	wire io_sel = addr < 16'h0060;
+	wire [6:0] io_addr = addr[6:0];
+	reg  [7:0] io_rdata;
+
+	reg [7:0] tcnt1 = 0;
+
+	// io writes are on the rising edge of the clock
+	always @(posedge clk) begin
+		tcnt1 <= tcnt1 + 1;
 		if (wen && io_sel) begin
-			$display("IO %04x <= %02x", addr, wdata);
+			$display("IO %02x <= %02x", io_addr, wdata);
+			// writes are not yet supported
 		end
+	end
+
+	// io reads are continuous assignment since they must be 
+	// available in a single cycle.  note that these are memory
+	// addresses, not IO port addresses
+	always @(*) begin
+		case(io_addr)
+		7'h4F: io_rdata = tcnt1;
+		default: io_rdata = io_addr;
+		endcase
+		//if (io_sel && ren)
+			//$display("IN %02x = %02x", io_addr, io_rdata);
 	end
 
 	avr_cpu cpu(
@@ -95,7 +100,7 @@ module top(
 		.data_addr(addr),
 		.data_wen(wen),
 		.data_ren(ren),
-		.data_read(rdata),
+		.data_read(io_sel ? io_rdata : ram_rdata),
 		.data_write(wdata)
 	);
 

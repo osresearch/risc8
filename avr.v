@@ -106,7 +106,8 @@ module avr_cpu(
 	wire R3 = R[3];
 	wire R7 = R[7];
 
-	wire [15:0] io_addr = { 10'b10_0000_0000, opcode[10:9], opcode[3:0] };
+	// IN and OUT instructions
+	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
 
 	// sign extended 12-bit value
 	wire [15:0] simm12 = {
@@ -127,7 +128,7 @@ module avr_cpu(
 		cycle <= 0;
 		skip <= 0;
 		reg_PC <= 0;
-		reg_SP <= 16'h0100;
+		reg_SP <= 16'h1000;
 		addr <= 0;
 		wen <= 0;
 		ren <= 0;
@@ -924,26 +925,38 @@ module avr_cpu(
 		end
 */
 		// OUT to IO space (no sreg update)
+		// the ones for registers are handled here,
+		// otherwise the external controller will handle it
 		16'b1011_1???_????_????: begin
-			next_addr = io_addr;
-			next_wdata = alu_Rd;
 			next_wen = 1;
+			next_wdata = alu_Rd;
+			next_addr = io_addr + 8'h20;
+
+			case(io_addr)
+			6'h3D: next_SP[ 7:0] = alu_Rd;
+			6'h3E: next_SP[15:8] = alu_Rd;
+			6'h3F: { SI, ST, SH, SS, SV, SN, SZ, SC } = alu_Rd;
+			default: begin
+				// nothing to do here; SOC handles it
+			end
+			endcase
 		end
 
 		// IN from IO space (no sreg update, should be 1 cycle)
-		16'b1011_0???_????_????:
-			case(cycle)
-			2'b00: begin
-				// start the read
-				next_addr = io_addr;
-				next_ren = 1;
-				next_cycle = 1;
-			end
-			2'b01: begin
-				dest = DEST_RD;
-				R = data_read;
-			end
+		// the registers ones are handled here, otherwise
+		// the external SOC will handle it.
+		16'b1011_0???_????_????: begin
+			dest = DEST_RD;
+			next_addr = io_addr + 8'h20;
+			next_ren = 1;
+
+			case(io_addr)
+			6'h3D: R = reg_SP[ 7:0];
+			6'h3E: R = reg_SP[15:8];
+			6'h3F: R = sreg;
+			default: R = data_read; // from the SOC
 			endcase
+		end
 
 		// IJMP Z - Indirect jump/call to Z or EIND:Z
 		16'b1001010_?_000_?_1001:

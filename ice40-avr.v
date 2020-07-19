@@ -1,5 +1,6 @@
 `default_nettype none
-`include "avr.v"
+`define AVR_PROGRAM "test4.hex"
+`include "soc.v"
 
 module top(
 	output led_r,
@@ -18,52 +19,21 @@ module top(
 	);
 	wire clk = clk_48;
 
-	// code memory
-	reg [15:0] code[0:511];
-	reg [15:0] cdata;
-	wire [15:0] pc;
-	initial $readmemh("test3.hex", code);
+	assign led_r = ~port_b[0];
+	assign led_g = ~port_b[1];
+	assign led_b = ~port_b[2];
 
-	// data memory
-	wire [15:0] addr;
-	reg [7:0] rdata;
-	wire [7:0] wdata;
-	wire wen;
-	wire ren;
-	reg [7:0] ram[0:8191];
+	wire [7:0] port_b;
+	wire [7:0] ddr_b;
+	reg [7:0] pin_b = 0;
 
-	assign led_r = 1;
-	assign led_g = 1;
-	assign led_b = pc[0];
-
-	always @(posedge clk)
-		cdata <= code[pc];
-
-	always @(posedge clk)
-	begin
-		rdata <= ram[addr[12:0]];
-		if (ren) begin
-			$display("RD %04x => %02x", addr, ram[addr[12:0]]);
-		end
-
-		if (wen) begin
-			$display("WR %04x <= %02x", addr, wdata);
-			ram[addr[12:0]] <= wdata;
-		end
-	end
-
-	avr_cpu cpu(
+	avr_soc cpu(
 		.clk(clk),
 		.reset(reset),
 
-		.pc(pc),
-		.cdata(cdata),
-
-		.data_addr(addr),
-		.data_wen(wen),
-		.data_ren(ren),
-		.data_read(rdata),
-		.data_write(wdata)
+		.port_b(port_b),
+		.pin_b(pin_b),
+		.ddr_b(ddr_b),
 	);
 
 endmodule

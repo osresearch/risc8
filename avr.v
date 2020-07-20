@@ -1,5 +1,6 @@
 `ifndef _avr_cpu_v_
 `define _avr_cpu_v_
+`include "alu.v"
 
 module avr_cpu(
 	input clk,
@@ -32,16 +33,7 @@ module avr_cpu(
 	reg [15:0] reg_SP;
 	reg [15:0] next_SP;
 	reg [7:0] sreg;
-	localparam SREG_I = 7;
-	localparam SREG_T = 6;
-	localparam SREG_H = 5;
-	localparam SREG_S = 4;
-	localparam SREG_V = 3;
-	localparam SREG_N = 2;
-	localparam SREG_Z = 1;
-	localparam SREG_C = 0;
 	reg SI, ST, SH, SS, SV, SN, SZ, SC;
-	wire [7:0] next_sreg = { SI, ST, SH, SS, SV, SN, SZ, SC };
 
 	// the PC output is almost always the actual PC,
 	// although sometimes it is the address for a LPM
@@ -76,36 +68,16 @@ module avr_cpu(
 	assign data_write = next_wdata;
 
 	reg invalid_op;
-	reg [7:0] R;
-	reg [7:0] R1;
-	reg [1:0] dest;
-	reg [5:0] dest_base;
-	localparam DEST_NONE = 0;
-	localparam DEST_RD = 1;
-	localparam DEST_RDI = 2;
-	localparam DEST_WORD = 3;
+	reg [5:0] dest;
+	reg alu_store;
+	reg alu_word;
 
-	// ALU registers
-	wire [5:0] alu_r = { opcode[9], opcode[3:0] }; // 0-31
-	wire [5:0] alu_d = opcode[8:4]; // 0-31
-	wire [5:0] alu_di = { 1'b1, opcode[7:4] }; // 16-31
-	wire [7:0] alu_Rr = regs[alu_r];
-	wire [7:0] alu_Rd = regs[alu_d];
-	wire [7:0] alu_Rdi = regs[alu_di];
-	wire [7:0] alu_K = { opcode[11:8], opcode[3:0] };
-	wire [5:0] alu_Q = { opcode[13], opcode[15:14], opcode[2:0] };
-
-	// helpers for computing sreg updates
-	wire Rdi3 = alu_Rdi[3];
-	wire Rdi7 = alu_Rdi[7];
-	wire Rd3 = alu_Rd[3];
-	wire Rd7 = alu_Rd[7];
-	wire Rr3 = alu_Rr[3];
-	wire Rr7 = alu_Rr[7];
-	wire K3 = alu_K[3];
-	wire K7 = alu_K[7];
-	wire R3 = R[3];
-	wire R7 = R[7];
+	// opcode registers
+	wire [5:0] op_Rr = { opcode[9], opcode[3:0] }; // 0-31
+	wire [5:0] op_Rd = opcode[8:4]; // 0-31
+	wire [5:0] op_Rdi = { 1'b1, opcode[7:4] }; // 16-31
+	wire [7:0] op_K = { opcode[11:8], opcode[3:0] };
+	wire [5:0] op_Q = { opcode[13], opcode[15:14], opcode[2:0] };
 
 	// IN and OUT instructions
 	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
@@ -127,6 +99,24 @@ module avr_cpu(
 
 	// immediate word 6-bit values
 	wire [5:0] immw6 = { opcode[7:6], opcode[3:0] };
+
+	// ALU to perform the operations
+	wire [7:0] next_sreg;
+	reg [15:0] alu_Rd;
+	reg [7:0] alu_Rr;
+	reg [3:0] alu_op;
+	wire [15:0] alu_out;
+
+	alu avr_alu(
+		.clk(clk),
+		.reset(reset),
+		.op(alu_op),
+		.Rd_in(alu_Rd),
+		.Rr_in(alu_Rr),
+		.R_out(alu_out),
+		.sreg_in(sreg),
+		.sreg_out(next_sreg)
+	);
 
 	always @(posedge clk) if (reset) begin
 		cycle <= 0;
@@ -165,15 +155,11 @@ module avr_cpu(
 		ren <= next_ren;
 		wdata <= next_wdata;
 
-		case(dest)
-		0: begin /* Nothing */ end
-		DEST_RD: regs[alu_d] <= R;
-		DEST_RDI: regs[alu_di] <= R;
-		DEST_WORD: begin
-			regs[dest_base | 0] <= R;
-			regs[dest_base | 1] <= R1;
+		if (alu_store) begin
+			regs[dest] <= alu_out[7:0];
+			if (alu_word)
+				regs[dest|1] <= alu_out[15:8];
 		end
-		endcase
 
 		//if (invalid_op)
 			$display("%04x.%d: %04x%s%s",
@@ -204,10 +190,16 @@ module avr_cpu(
 		next_ren = 0;
 
 		invalid_op = 0;
-		R = 0;
-		R1 = 0;
-		dest = 0;
-		dest_base = 0;
+
+		// Default is to not store, but if commiting to the register
+		// file is selected, then to store to the Rd value
+		alu_store = 0;
+		alu_word = 0;
+		dest = op_Rd;
+
+		alu_op = `OP_MOVE;
+		alu_Rd = regs[op_Rd];
+		alu_Rr = regs[op_Rr];
 
 		if (skip) begin
 			// only a few instructions require an extra skip
@@ -228,10 +220,13 @@ module avr_cpu(
 		end
 		16'b00000001_????_????: begin
 			// MOVW Rd,Rr Move register pair
-			dest = DEST_WORD;
-			dest_base = { opcode[7:4], 1'b0 };
-			R1 = regs[{opcode[3:0], 1'b1 }];
-			R = regs[{opcode[3:0], 1'b0 }];
+			dest = { opcode[7:4], 1'b0 };
+			alu_word = 1;
+			alu_store = 1;
+			alu_Rd = {
+				regs[{opcode[3:0], 1'b1 }],
+				regs[{opcode[3:0], 1'b0 }]
+			};
 		end
 		16'b0000_0011_0???_1???: begin
 			// MUL and FMUL, unimplemented
@@ -241,173 +236,92 @@ module avr_cpu(
 		// 2-operand instructions
 		16'b000_0_01_?_?????_????: begin
 			// CPC Rd,Rr (no dest, only sreg)
-			R = alu_Rd - alu_Rr - sreg[SREG_C];
-			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
-			SS = SN ^ SV;
-			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
-			SN = R7;
-			SZ = (R == 0) & sreg[SREG_Z];
-			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
+			alu_op = `OP_SBC;
 		end
 		16'b000_1_01_?_?????_????: begin
 			// CP Rd,Rr (no dest, only sreg)
-			R = alu_Rd - alu_Rr;
-			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
-			SS = SN ^ SV;
-			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
-			SN = R7;
-			SZ = R == 0;
-			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
+			alu_op = `OP_SUB;
 		end
 		16'b000010_?_?????_????: begin
 			// SBC Rd,Rr
-			dest = DEST_RD;
-			R = alu_Rd - alu_Rr - sreg[SREG_C];
-			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
-			SS = SN ^ SV;
-			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
-			SN = R7;
-			SZ = (R == 0) & sreg[SREG_Z];
-			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
+			alu_op = `OP_SBC;
+			alu_store = 1;
 		end
 		16'b000110_?_?????_????: begin
 			// SUB Rd,Rr
-			dest = DEST_RD;
-			R = alu_Rd - alu_Rr;
-			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
-			SS = SN ^ SV;
-			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
-			SN = R7;
-			SZ = R == 0;
-			SC = !Rd7 & Rr7 | Rr7 & R7 | R7 & !Rd7;
+			alu_op = `OP_SUB;
+			alu_store = 1;
 		end
 		16'b000_0_11_?_?????_????: begin
-			dest = DEST_RD;
-			if (alu_r == alu_d) begin
-				// LSL Rd when Rd=Rr
-				R = { alu_Rd[6:0], 1'b0 };
-				SH = Rd3;
-				SS = SN ^ SV; 
-				SV = SN ^ SC;
-				SN = R7;
-				SZ = R == 0;
-				SC = Rd7;
-			end else begin
-				// ADD Rd,Rr
-				R = alu_Rd + alu_Rr;
-				SH = (Rd3 & Rr3) | (Rr3 & !R3) | (Rd3 & !R3);
-				SS = SN ^ SV;
-				SV = SN ^ SC;
-				SN = R7;
-				SZ = R == 0;
-				SC = Rd7 & Rr7 | Rr7 & !R7 | Rd7 & !R7;
-			end
+			alu_store = 1;
+			if (op_Rd == op_Rr)
+				alu_op = `OP_LSL; // LSL Rd when Rd=Rr
+			else
+				alu_op = `OP_ADD; // ADD Rd,Rr
 		end
 		16'b000_1_11_?_?????_????: begin
-			dest = DEST_RD;
-			if (alu_r == alu_d) begin
-				// ROL Rd when Rd=Rr
-				R = { alu_Rd[6:0], sreg[SREG_C] };
-				SH = Rd3;
-				SS = SN ^ SV;
-				SV = SN ^ SC;
-				SZ = R == 0;
-				SC = Rd7;
-			end else begin
-				// ADC Rd,Rr
-				R = alu_Rd + alu_Rr + sreg[SREG_C];
-				SH = Rd3 & Rr3 | Rr3 & !R3 | !R3 & Rd3;
-				SS = SN ^ SV;
-				SV = Rd7 & Rr7 & !R7 | !Rd7 & !Rr7 & R7;
-				SN = R7;
-				SZ = R == 0;
-				SC = Rd7 & Rr7 | Rr7 & !R7 | !R7 & Rd7;
-			end
+			alu_store = 1;
+			if (op_Rd == op_Rr)
+				alu_op = `OP_ROL; // ROL Rd when Rd=Rr
+			else
+				alu_op = `OP_ADC; // ADC Rd,Rr
 		end
 
 		16'b0010_00??_????_????: begin
 			// AND Rd,Rr
-			dest = DEST_RD;
-			R = alu_Rd & alu_Rr;
-			SS = SN ^ SV;
-			SV = 0;
-			SN = R7;
-			SZ = R == 0;
+			alu_store = 1;
+			alu_op = `OP_AND;
 		end
 		16'b0010_01??_????_????: begin
 			// EOR Rd,Rr
-			dest = DEST_RD;
-			R = alu_Rd ^ alu_Rr;
-			SS = SN ^ SV;
-			SV = 0;
-			SN = R7;
-			SZ = R == 0;
+			alu_store = 1;
+			alu_op = `OP_EOR;
 		end
 		16'b0010_10??_????_????: begin
 			// OR Rd,Rr
-			dest = DEST_RD;
-			R = alu_Rd | alu_Rr;
-			SS = SN ^ SV;
-			SV = 0;
-			SN = R7;
-			SZ = R == 0;
+			alu_store = 1;
+			alu_op = `OP_OR;
 		end
 		16'b0010_11??_????_????: begin
 			// MOV Rd,Rr (no sreg updates)
-			dest = DEST_RD;
-			R = alu_Rr;
+			alu_store = 1;
 		end
 
 		// Register-immediate operations
 		16'b0011_????_????_????: begin
 			// CPI Rd,K (only updates status register, so no dest)
-			R = alu_Rdi - alu_K;
-			SH = (K3 & !Rdi3) | (K3 & R3) | (R3 & !Rdi3);
-			SS = SN ^ SV;
-			SV = (Rdi7 & !K7 & !R7) | (K7 & R7 & !Rdi7);
-			SN = R7;
-			SZ = R == 0;
-			SC = (!Rdi7 & K7) | (K7 & R7) | (R7 & !Rdi7);
+			alu_op = `OP_SUB;
+			alu_Rd = regs[op_Rdi];
+			alu_Rr = op_K;
+			alu_store = 1;
 		end
 		16'b0100_????_????_????: begin
 			// SBCI Rd, K
-			dest = DEST_RDI;
-			R = alu_Rdi - alu_K - sreg[SREG_C];
-			SH = !Rdi3 & K3 | K3 & !R3 | R3 & !Rdi3;
-			SS = SN ^ SV;
-			SV = Rdi7 & !K7 & !R7 | !Rdi7 & K7 & R7;
-			SN = R7;
-			SZ = (R == 0) & sreg[SREG_Z];
-			SC = !Rdi7 & K7 | K7 & R7 | R7 & !Rdi7;
+			alu_op = `OP_SBC;
+			alu_Rd = regs[op_Rdi];
+			alu_Rr = op_K;
+			alu_store = 1;
 		end
 		16'b0101_????_????_????: begin
 			// SUBI Rd, K
-			dest = DEST_RDI;
-			R = alu_Rdi - alu_K;
-			SH = (K3 & !Rdi3) | (K3 & R3) | (R3 & !Rdi3);
-			SS = SN ^ SV;
-			SV = (Rdi7 & !K7 & !R7) | (K7 & R7 & !Rdi7);
-			SN = R7;
-			SZ = R == 0;
-			SC = (!Rdi7 & K7) | (K7 & R7) | (R7 & !Rdi7);
+			alu_op = `OP_SUB;
+			alu_Rd = regs[op_Rdi];
+			alu_Rr = op_K;
+			alu_store = 1;
 		end
 		16'b0110_????_????_????: begin
 			// ORI Rd,K or SBR Rd, K
-			dest = DEST_RDI;
-			R = alu_Rdi | alu_K;
-			SS = SN ^ SV;
-			SV = 0;
-			SN = R7;
-			SZ = R == 0;
+			alu_op = `OP_OR;
+			alu_Rd = regs[op_Rdi];
+			alu_Rr = op_K;
+			alu_store = 1;
 		end
 		16'b0111_????_????_????: begin
 			// ANDI Rd,K or CBR Rd, K
-			dest = DEST_RDI;
-			R = alu_Rdi & alu_K;
-			SS = SN ^ SV;
-			SV = 0;
-			SN = R7;
-			SZ = R == 0;
+			alu_op = `OP_AND;
+			alu_Rd = regs[op_Rdi];
+			alu_Rr = op_K;
+			alu_store = 1;
 		end
 
 		// LDS rd,i  / STS i,rd
@@ -427,7 +341,7 @@ module avr_cpu(
 				if (is_store) begin
 					// STS: write to that address
 					// no extra cycle required
-					next_wdata = regs[alu_d];
+					next_wdata = regs[op_Rd];
 					next_wen = 1;
 				end else begin
 					// LDS: request a read of the addr
@@ -438,8 +352,8 @@ module avr_cpu(
 			end
 			2'b10: begin
 				// only LDS, store the data read
-				dest = DEST_RD;
-				R = data_read;
+				alu_store = 1;
+				alu_Rd = data_read;
 			end
 			endcase
 
@@ -452,35 +366,37 @@ module avr_cpu(
 				if (is_store) begin
 					// STS (no extra cycle needed)
 					next_wen = 1;
-					next_wdata = alu_Rd;
+					next_wdata = regs[op_Rd];
 				end else begin
 					// LD
 					next_ren = 1;
 					next_cycle = 1;
 				end
 
+				dest = BASE_X;
+				alu_store = 1;
+				alu_word = 1;
+				alu_Rd = reg_X;
+				alu_Rr = 1;
+
 				case(opcode[1:0])
 				2'b00: next_addr = reg_X;
 				2'b01: begin
 					// post-increment
-					dest = DEST_WORD;
-					dest_base = BASE_X;
-					{ R1, R } = reg_X + 1;
+					alu_op = `OP_ADD;
 					next_addr = reg_X;
 				end
 				2'b10: begin
 					// pre-decrement
-					dest = DEST_WORD;
-					dest_base = BASE_X;
-					{ R1, R } = reg_X - 1;
+					alu_op = `OP_SUB;
 					next_addr = reg_X - 1;
 				end
 				endcase
 			end
 			2'b01: begin
-				// extra cycle only for LD
-				dest = DEST_RD;
-				R = data_read;
+				// extra cycle only for LD to store into Rd
+				alu_store = 1;
+				alu_Rd = data_read;
 			end
 			endcase
 
@@ -491,18 +407,18 @@ module avr_cpu(
 				if (is_store) begin
 					// ST instruction
 					next_wen = 1;
-					next_wdata = alu_Rd;
+					next_wdata = regs[op_Rd];
 				end else begin
 					// LD instruction
 					next_cycle = 1;
 					next_ren = 1;
 				end
 
-				next_addr = reg_Z + alu_Q;
+				next_addr = reg_Z + op_Q;
 			end
 			2'b01: begin
-				dest = DEST_RD;
-				R = data_read;
+				alu_store = 1;
+				alu_Rd = data_read;
 			end
 			endcase
 
@@ -514,7 +430,7 @@ module avr_cpu(
 				if (is_store) begin
 					// ST instruction
 					next_wen = 1;
-					next_wdata = alu_Rd;
+					next_wdata = regs[op_Rd];
 				end else begin
 					// LD instruction
 					next_ren = 1;
@@ -524,23 +440,29 @@ module avr_cpu(
 				case(opcode[1:0])
 				2'b01: begin
 					// post increment
-					dest = DEST_WORD;
-					dest_base = BASE_Z;
-					{ R1, R } = reg_Z + 1;
+					alu_store = 1;
+					alu_word = 1;
+					dest = BASE_Z;
+					alu_op = `OP_ADD;
+					alu_Rd = reg_Z;
+					alu_Rr = 1;
 					next_addr = reg_Z;
 				end
 				2'b10: begin
 					// predecrement
-					dest = DEST_WORD;
-					dest_base = BASE_Z;
-					{ R1, R } = reg_Z - 1;
-					next_addr = reg_X - 1;
+					alu_store = 1;
+					alu_word = 1;
+					dest = BASE_Z;
+					alu_op = `OP_SUB;
+					alu_Rd = reg_Z;
+					alu_Rr = 1;
+					next_addr = reg_Z - 1;
 				end
 				endcase
 			end
 			2'b01: begin
-				dest = DEST_RD;
-				R = data_read;
+				alu_store = 1;
+				alu_Rd = data_read;
 			end
 			endcase
 
@@ -551,18 +473,18 @@ module avr_cpu(
 				if (is_store) begin
 					// ST instruction
 					next_wen = 1;
-					next_wdata = alu_Rd;
+					next_wdata = regs[op_Rd];
 				end else begin
 					// LD instruction
 					next_cycle = 1;
 					next_ren = 1;
 				end
 
-				next_addr = reg_Y + alu_Q;
+				next_addr = reg_Y + op_Q;
 			end
 			2'b01: begin
-				dest = DEST_RD;
-				R = data_read;
+				alu_store = 1;
+				alu_Rd = data_read;
 			end
 			endcase
 
@@ -582,8 +504,8 @@ module avr_cpu(
 			2'b01: begin
 				// store the correct byte of read data,
 				// based on the bottom bit of Z
-				dest = DEST_RD;
-				R = reg_Z[0] ? cdata[15:8] : cdata[7:0];
+				alu_store = 1;
+				alu_Rd = reg_Z[0] ? cdata[15:8] : cdata[7:0];
 				next_cycle = 2;
 
 				// and return to the program flow by
@@ -594,9 +516,12 @@ module avr_cpu(
 			2'b10: begin
 				if(opcode[1:0] == 2'b01) begin
 					// Z+ addressing, 3 cycles
-					dest = DEST_WORD;
-					dest_base = BASE_Z;
-					{ R1, R } = reg_Z + 1;
+					alu_store = 1;
+					alu_word = 1;
+					dest = BASE_Z;
+					alu_op = `OP_ADD;
+					alu_Rd = reg_Z;
+					alu_Rr = 1;
 				end
 			end
 			endcase
@@ -637,8 +562,8 @@ module avr_cpu(
 				next_SP = reg_SP + 1;
 			end
 			2'b01: begin
-				dest = DEST_RD;
-				R = data_read;
+				alu_store = 1;
+				alu_Rd = data_read;
 			end
 			endcase
 
@@ -646,31 +571,24 @@ module avr_cpu(
 
 		// COM Rd
 		16'b1001010_?????_0000: begin
-			dest = DEST_RD;
-			R = 8'hFF - alu_Rd;
-			SS = SN ^ SV;
-			SV = 0;
-			SN = R7;
-			SZ = R == 0;
-			SC = 1;
+			alu_store = 1;
+			alu_op = `OP_SUB;
+			alu_Rd = 8'hFF;
+			alu_Rr = regs[op_Rd];
 		end
 
 		// NEG Rd
 		16'b1001010_?????_0001: begin
-			dest = DEST_RD;
-			R = 8'h00 - alu_Rd;
-			SH = R3 | !Rd3;
-			SS = SN ^ SV;
-			SV = R7 && (R[6:0] == 0);
-			SN = R7;
-			SZ = R == 0;
-			SC = R != 0;
+			alu_store = 1;
+			alu_op = `OP_SUB;
+			alu_Rd = 8'h00;
+			alu_Rr = regs[op_Rd];
 		end
 
 		// SWAP Rd, no sreg updates
 		16'b1001010_?????_0010: begin
-			dest = DEST_RD;
-			R = { alu_Rd[3:0], alu_Rd[7:4] };
+			alu_store = 1;
+			alu_Rd = { regs[op_Rd][3:0], regs[op_Rd][7:4] };
 		end
 
 /*
@@ -681,35 +599,20 @@ module avr_cpu(
 */
 		// ASR Rd
 		16'b1001010_?????_0101: begin
-			dest = DEST_RD;
-			R = { alu_Rd[7], alu_Rd[7:1] };
-			SS = SN ^ SV;
-			SV = SN ^ SC;
-			SN = R7;
-			SZ = R == 0;
-			SC = alu_Rd[0];
+			alu_store = 1;
+			alu_op = `OP_ASR;
 		end
 
 		// LSR Rd
 		16'b1001010_?????_0110: begin
-			dest = DEST_RD;
-			R = { 1'b0, alu_Rd[7:1] };
-			SS = SN ^ SV;
-			SV = SN ^ SC;
-			SN = 0;
-			SZ = R == 0;
-			SC = alu_Rd[0];
+			alu_store = 1;
+			alu_op = `OP_LSR;
 		end
 
 		// ROR Rd
 		16'b1001_010?_????_0111: begin
-			dest = DEST_RD;
-			R = { sreg[SREG_C], alu_Rd[7:1] };
-			SS = SN ^ SV;
-			SV = SN ^ SC;
-			SN = R7;
-			SZ = R == 0;
-			SC = alu_Rd[0];
+			alu_store = 1;
+			alu_op = `OP_ROR;
 		end
 
 		// CLx Status register clear bit
@@ -811,22 +714,16 @@ module avr_cpu(
 
 		// DEC Rd
 		16'b1001010_?????_1010: begin
-			dest = DEST_RD;
-			R = alu_Rd - 1;
-			SS = SN ^ SV;
-			SV = !R7 & (R[6:0] != 0);
-			SN = R7;
-			SZ = R == 0;
+			alu_store = 1;
+			alu_op = `OP_SUB;
+			alu_Rr = 1;
 		end
 
 		// INC Rd
 		16'b1001010_?????_0011: begin
-			dest = DEST_RD;
-			R = alu_Rd + 1;
-			SS = SN ^ SV;
-			SV = R7 & (R[6:0] == 0);
-			SN = R7;
-			SZ = R == 0;
+			alu_store = 1;
+			alu_op = `OP_ADD;
+			alu_Rr = 1;
 		end
 /*
 		16'b10010100_????_1011: begin
@@ -907,23 +804,16 @@ module avr_cpu(
 
 		// ADIW/SBIW Rp, uimm6
 		16'b1001_011?_????_????: begin
-			dest = DEST_WORD;
-			dest_base = { opcode[5:4], 3'b000 };
+			alu_store = 1;
+			alu_word = 1;
+			dest = { opcode[5:4], 3'b000 };
+			alu_Rd = { regs[dest|1], regs[dest] };
+			alu_Rr = immw6;
 
-			if (opcode[8]) begin
-				// SBIW
-				{R1,R} = { regs[dest_base|1], regs[dest_base] } - immw6;
-				SC = R1[7] & !regs[dest_base|1][7];
-			end else begin
-				// ADIW
-				{R1,R} = { regs[dest_base|1], regs[dest_base] } + immw6;
-				SC = !R1[7] & regs[dest_base|1][7]; // Rdh7
-			end
-
-			SS = SN^SV;
-			SV = !regs[dest_base|1][7] & R1[7]; // !Rdh7 & R15
-			SN = R1[7]; // R15
-			SZ = { R1, R } == 0;
+			if (opcode[8])
+				alu_op = `OP_SBW;
+			else
+				alu_op = `OP_ADW;
 		end
 /*
 		16'b100110_?_0_?????_???: begin
@@ -961,15 +851,15 @@ module avr_cpu(
 		// the registers ones are handled here, otherwise
 		// the external SOC will handle it.
 		16'b1011_0???_????_????: begin
-			dest = DEST_RD;
+			alu_store = 1;
 			next_addr = io_addr + 8'h20;
 			next_ren = 1;
 
 			case(io_addr)
-			6'h3D: R = reg_SP[ 7:0];
-			6'h3E: R = reg_SP[15:8];
-			6'h3F: R = sreg;
-			default: R = data_read; // from the SOC
+			6'h3D: alu_Rd = reg_SP[ 7:0];
+			6'h3E: alu_Rd = reg_SP[15:8];
+			6'h3F: alu_Rd = sreg;
+			default: alu_Rd = data_read; // from the SOC
 			endcase
 		end
 
@@ -1017,8 +907,8 @@ module avr_cpu(
 
 		// LDI Rd, K (no sreg updates)
 		16'b1110_????_????_????: begin
-			dest = DEST_RDI;
-			R = alu_K;
+			alu_store = 1;
+			alu_Rd = op_K;
 		end
 
 /*

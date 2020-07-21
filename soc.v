@@ -47,11 +47,11 @@ module avr_soc(
 	begin
 		ram_data <= ram[addr[RAMBITS-1:0]];
 		if (ren) begin
-			$display("RD %04x => %02x", addr, ram[addr[RAMBITS-1:0]]);
+			//$display("RD %04x => %02x", addr, ram[addr[RAMBITS-1:0]]);
 		end
 
 		if (wen) begin
-			$display("WR %04x <= %02x", addr, wdata);
+			//$display("WR %04x <= %02x", addr, wdata);
 			ram[addr[RAMBITS-1:0]] <= wdata;
 		end
 	end
@@ -69,7 +69,7 @@ module avr_soc(
 		tcnt1 <= tcnt1 + 1;
 
 		if (wen && io_sel) begin
-			$display("IO %02x <= %02x", io_addr, wdata);
+			//$display("IO %02x <= %02x", io_addr, wdata);
 			case(io_addr)
 			7'h37: ddr_b <= wdata;
 			7'h38: port_b <= wdata;

@@ -54,7 +54,7 @@ module avr_cpu(
 	wire [7:0] reg_Rb;
 
 
-	regfile_ram regs(
+	regfile regs(
 		.clk(clk),
 		.reset(reset),
 		// Read ports. Rd is 8 or 16 bits, Rr is always 8
@@ -123,9 +123,9 @@ module avr_cpu(
 	wire [5:0] op_Rr = { opcode[9], opcode[3:0] }; // 0-31
 	wire [5:0] op_Rd = opcode[8:4]; // 0-31
 	wire [5:0] op_Rdi = { 1'b1, opcode[7:4] }; // 16-31
+ 	wire [5:0] op_Rp = { opcode[5:4], 3'b000 };
 	wire [7:0] op_K = { opcode[11:8], opcode[3:0] };
 	wire [5:0] op_Q = { opcode[13], opcode[15:14], opcode[2:0] };
-
 	// IN and OUT instructions
 	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
 
@@ -185,8 +185,9 @@ module avr_cpu(
 		prev_alu_store <= 0;
 
 	end else begin
-		$display("%04x: %016b A[%d]=%04x B[%d]=%02x, %04x %x %02x = %04x => %d%s",
-			(reg_PC * 2) & 16'hFFFF,
+		if (cycle == 0)
+		$display("%04x: %04x A[%d]=%04x B[%d]=%02x, %04x %x %02x = %04x => %d%s",
+			reg_PC * 16'h2,
 			opcode,
 			sel_Ra, reg_Ra,
 			sel_Ra, reg_Rb,
@@ -200,7 +201,7 @@ module avr_cpu(
 
 		// only advance the PC if we are not in
 		// a multi-cycle instruction and not a LPM
-		if (force_PC || cycle == 0)
+		if (force_PC || next_cycle == 0)
 			reg_PC <= next_PC;
 
 		reg_SP <= next_SP;
@@ -258,10 +259,7 @@ module avr_cpu(
 		if (reset)
 			next_PC = 0;
 		else
-		if (cycle == 0)
 			next_PC = reg_PC + 1;
-		else
-			next_PC = reg_PC;
 
 		// most instructions are single cycle, no writes, no reads
 		next_cycle = 0;
@@ -270,6 +268,7 @@ module avr_cpu(
 		next_addr = 0;
 		next_wdata = 0;
 		force_PC = 0;
+		next_SP = reg_SP;
 
 
 		// Default is to not store, but if commiting to the register
@@ -457,6 +456,23 @@ module avr_cpu(
 		end
 		endcase
 
+		// ADIW/SBIW Rp, uimm6
+		if (opcode[15:9] == 7'b1001_011)
+		begin
+			// 16'b1001_011?_????_????: begin
+			sel_Ra = op_Rp;
+			sel_Rd = op_Rp;
+			alu_store = 1;
+			alu_word = 1;
+			alu_const = 1;
+			alu_const_value = immw6;
+
+			if (opcode[8])
+				alu_op = `OP_SBW;
+			else
+				alu_op = `OP_ADW;
+		end
+
 		if (opcode[15:8] == 8'b0000_0001) begin
 			// MOVW Rd,Rr Move register pair
 			// 16'b0000_0001_????_????: begin
@@ -464,12 +480,11 @@ module avr_cpu(
 			sel_Rd = { opcode[7:4], 1'b0 }; // will write both bytes
 			alu_word = 1;
 			alu_store = 1;
-		end else
+		end
 		if (opcode[15:12] == 4'b1110) begin
 			// LDI Rdi, K (no sreg updates)
 			// 16'b1110_????_????_????: begin
 			sel_Rd = op_Rdi;
-			sel_Ra = op_Rd;
 			alu_op = `OP_MOVR;
 			alu_store = 1;
 			alu_const = 1;
@@ -519,7 +534,7 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end else
+		end
 
 		if ((opcode[15:10] == 6'b1001_00 && (0
 		 ||  opcode[3:0] == 4'b1110 // -X
@@ -597,7 +612,7 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end else
+		end
 
 		// ST / LD Rd, Y/Z+Q (no status update)
 		if (opcode[15:14] == 2'b10
@@ -643,7 +658,7 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end else
+		end
 
 		// LPM/ELPM Rd, Z / Z+
 		if ((opcode[15:9] == 7'b1001_000 && (0
@@ -690,7 +705,6 @@ module avr_cpu(
 			endcase
 		end
 
-`ifdef notyet
 
 /*
 		16'b1001001_?????_0100: begin
@@ -711,27 +725,46 @@ module avr_cpu(
 		end
 */
 		// PUSH Rd
-		16'b1001_001?_????_1111: begin
-			// enqueue the data write
-			next_wen = 1;
-			next_addr = reg_SP;
-			next_SP = reg_SP - 1;
-			next_wdata = alu_Rd;
+		if (opcode[15:9] == 7'b1001_001
+		&&  opcode[ 3:0] == 4'b1111)
+		begin
+			case(cycle)
+			2'b00: begin
+				// just delay until we have the Rd available
+				// in register A
+				next_cycle = 1;
+			end
+			2'b01: begin
+				// enqueue the write
+				next_wen = 1;
+				next_addr = reg_SP;
+				next_SP = reg_SP - 1;
+				next_wdata = reg_Ra;
+			end
+			endcase
 		end
+
 		// POP Rd
-		16'b1001_000?_????_1111:
+		if (opcode[15:9] == 7'b1001_001
+		&&  opcode[ 3:0] == 4'b1111)
+		begin
+			// 16'b1001_000?_????_1111:
 			case(cycle)
 			2'b00: begin
 				// start the read
 				next_ren = 1;
 				next_addr = reg_SP + 1;
 				next_SP = reg_SP + 1;
+				next_cycle = 1;
 			end
 			2'b01: begin
+				alu_op = `OP_MOVR;
 				alu_store = 1;
-				alu_Rd = data_read;
+				alu_const = 1;
+				alu_const_value = data_read;
 			end
 			endcase
+		end
 
 		// One operand instructions
 
@@ -740,7 +773,6 @@ module avr_cpu(
 		16'b1001010_?????_0100: begin
 			invalid_op = 1;
 		end
-*/
 		// CLx Status register clear bit
 		16'b1001_0100_1???_1000: begin
 			(* full_case *)
@@ -770,14 +802,16 @@ module avr_cpu(
 			3'b111: SI = 1;
 			endcase
 		end
+*/
 
 		// Zero-operand instructions
 
 		// RET
-		16'b1001010100001000:
+		if (opcode[15:0] == 16'b1001010100001000)
+		begin
 			case(cycle)
 			2'b00: begin
-				next_cycle = cycle + 1;
+				next_cycle = 1;
 				next_SP = reg_SP + 1;
 				next_addr = next_SP;
 				next_ren = 1;
@@ -793,6 +827,7 @@ module avr_cpu(
 				next_PC = { temp[7:0], data_read };
 			end
 			endcase
+		end
 /*
 		16'b1001010100011000: begin
 			// RETI
@@ -846,24 +881,42 @@ module avr_cpu(
 */
 
 		// CPSE Rd,Rr (no sreg updates)
-		16'b0001_00??_????_????:
-			if (alu_Rd == alu_Rr)
+		if(opcode[15:10] == 16'b0001_00) begin
+			// wait for Rd and Rr to be available
+			if (cycle == 0)
+				next_cycle = 1;
+			else
+			if (reg_Ra == reg_Rb)
 				next_skip = 1;
+		end
 
 		// SBRC/SBRS skip if register bit b equals B
-		16'b1111_110?_????_0???, // SBRC
-		16'b1111_111?_????_0???: // SBRS
-			if (alu_Rd[opcode[2:0]] == opcode[9])
+		if (opcode[15:10] == 6'b1111_11
+		&&  opcode[    3] == 1'b0)
+		begin
+			// 16'b1111_110?_????_0???, // SBRC
+			// 16'b1111_111?_????_0???: // SBRS
+			if(cycle == 0)
+				next_cycle = 1;
+			else
+			if (reg_Ra[opcode[2:0]] == opcode[9])
 				next_skip = 1;
+		end
 
 		// BRBS/BRBC - Branch if bit in SREG is set/clear
-		16'b1111_00??_????_????, // BRBS
-		16'b1111_01??_????_????: // BRBC
+		if (opcode[15:11] == 5'b1111_0)
+		begin
+			// 16'b1111_00??_????_????, // BRBS
+			// 16'b1111_01??_????_????: // BRBC
 			if (sreg[opcode[2:0]] != opcode[9])
 				next_PC = reg_PC + simm7 + 1;
+		end
 
 		// JMP abs22, 3 cycles
-		16'b1001_010?_????_110?:
+		if (opcode[15:9] == 7'b1001_010
+		&&  opcode[ 3:1] == 3'b110)
+		begin
+			// 16'b1001_010?_????_110?:
 			// 16 bits in next word
 			case(cycle)
 			2'b00: begin
@@ -881,9 +934,13 @@ module avr_cpu(
 				// should be ready
 			end
 			endcase
+		end
 
 		// CALL abs22
-		16'b1001_010?_????_111?:
+		if (opcode[15:9] == 7'b1001_010
+		&&  opcode[ 3:1] == 3'b111)
+		begin
+			// 16'b1001_010?_????_111?:
 			// 16 bits in next word
 			case(cycle)
 			2'b00: begin
@@ -914,20 +971,65 @@ module avr_cpu(
 				next_PC = temp;
 			end
 			endcase
-
-		// ADIW/SBIW Rp, uimm6
-		16'b1001_011?_????_????: begin
-			alu_store = 1;
-			alu_word = 1;
-			dest = { opcode[5:4], 3'b000 };
-			alu_Rd = { regs[dest|1], regs[dest] };
-			alu_Rr = immw6;
-
-			if (opcode[8])
-				alu_op = `OP_SBW;
-			else
-				alu_op = `OP_ADW;
 		end
+
+		// IJMP Z - Indirect jump/call to Z or EIND:Z
+		if (opcode[15:9] == 7'b1001_010
+		&&  opcode[ 7:5] == 3'b000
+		&&  opcode[ 3:0] == 4'b1001)
+		begin
+			// 16'b1001_010?_000?_1001:
+			// 2 cycles
+			case(cycle)
+			2'b00: begin
+				next_cycle = 1;
+				sel_Ra = BASE_Z;
+			end
+			2'b01: begin
+				next_PC = reg_Ra;
+			end
+			endcase
+		end
+
+		// RJMP to PC + simm12
+		if (opcode[15:12] == 4'b1100)
+		begin
+			// 16'b1100_????????????:
+			// 2 cycles
+			next_PC = reg_PC + simm12 + 1;
+		end
+
+		// RCALL to PC + simm12
+		if (opcode[15:12] == 4'b1101)
+		begin
+			// 16'b1101_????????????:
+			// 3 cycles
+			case(cycle)
+			2'b00: begin
+				// push the first half of the PC
+				next_wen = 1;
+				next_addr = reg_SP;
+				next_SP = reg_SP - 1;
+				next_wdata = next_PC[7:0]; // pc + 1
+				next_cycle = 1;
+			end
+			2'b01: begin
+				// push the second half
+				next_wen = 1;
+				next_addr = reg_SP;
+				next_SP = reg_SP - 1;
+				next_wdata = next_PC[15:8]; // pc + 1
+				next_cycle = 2;
+			end
+			2'b10: begin
+				// and do the jump
+				next_PC = reg_PC + simm12 + 1;
+				force_PC = 1;
+			end
+			endcase
+		end
+
+`ifdef notyet
 /*
 		16'b100110_?_0_?????_???: begin
 			// CBI/SBI a,b (clear/set IO bit)
@@ -975,49 +1077,6 @@ module avr_cpu(
 			default: alu_Rd = data_read; // from the SOC
 			endcase
 		end
-
-		// IJMP Z - Indirect jump/call to Z or EIND:Z
-		16'b1001010_?_000_?_1001:
-			// 2 cycles
-			case(cycle)
-			2'b00: next_cycle = 1;
-			2'b01: next_PC = reg_Z;
-			endcase
-
-		// RJMP to PC + simm12
-		16'b1100_????????????:
-			// 2 cycles
-			case(cycle)
-			2'b00: next_cycle = 1;
-			2'b01: next_PC = reg_PC + simm12 + 1;
-			endcase
-
-		// RCALL to PC + simm12
-		16'b1101_????????????:
-			// 3 cycles
-			case(cycle)
-			2'b00: begin
-				// push the first half of the PC
-				next_wen = 1;
-				next_addr = reg_SP;
-				next_SP = reg_SP - 1;
-				next_wdata = next_PC[7:0]; // pc + 1
-				next_cycle = 1;
-			end
-			2'b01: begin
-				// push the second half
-				next_wen = 1;
-				next_addr = reg_SP;
-				next_SP = reg_SP - 1;
-				next_wdata = next_PC[15:8]; // pc + 1
-				next_cycle = 2;
-			end
-			2'b10: begin
-				// and do the jump
-				next_PC = reg_PC + simm12 + 1;
-			end
-			endcase
-
 
 /*
 		16'b111110_?_?????_0_???: begin

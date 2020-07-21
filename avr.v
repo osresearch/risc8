@@ -267,6 +267,7 @@ module avr_cpu(
 		next_wen = 0;
 		next_addr = 0;
 		next_wdata = 0;
+		next_temp = temp;
 		force_PC = 0;
 		next_SP = reg_SP;
 

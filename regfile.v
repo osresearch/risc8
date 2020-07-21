@@ -162,10 +162,10 @@ module regfile(
 			end
 		end
 */
-		if (cache_valid && a == d)
-			Ra = Rd;
-		if (cache_valid && b == d)
-			Rb = Rd;
+		if (cache_valid && a == cache_d)
+			Ra = cache_Rd;
+		if (cache_valid && b == cache_d)
+			Rb = cache_Rd;
 	end
 endmodule
 

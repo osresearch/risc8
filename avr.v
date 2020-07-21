@@ -153,8 +153,8 @@ module avr_cpu(
 	reg [3:0] prev_alu_op;
 	wire [15:0] alu_out;
 	reg [7:0] alu_const_value;
-	reg alu_const;
 	reg [7:0] prev_alu_const_value;
+	reg alu_const;
 	reg prev_alu_const;
 	wire [7:0] sreg_out;
 
@@ -204,8 +204,8 @@ module avr_cpu(
 			reg_PC <= next_PC;
 
 		reg_SP <= next_SP;
-		cycle <= 0;
-		skip <= 0;
+		cycle <= next_cycle;
+		skip <=  next_skip;
 		prev_opcode <= opcode;
 		sreg <= sreg_out;
 
@@ -255,9 +255,17 @@ module avr_cpu(
 		// start pre-fetching the next PC
 	always @(*) begin
 		if (reset)
-			next_PC <= 0;
+			next_PC = 0;
 		else
-			next_PC <= reg_PC + 1;
+			next_PC = reg_PC + 1;
+
+		// most instructions are single cycle, no writes, no reads
+		next_cycle = 0;
+		next_ren = 0;
+		next_wen = 0;
+		next_addr = 0;
+		next_wdata = 0;
+		force_PC = 0;
 
 
 		// Default is to not store, but if commiting to the register
@@ -265,6 +273,7 @@ module avr_cpu(
 		alu_store = 0;
 		alu_word = 0;
 		alu_const = 0;
+		alu_const_value = 0;
 		alu_carry = 0;
 
 		// default is to select the Rd and Rr from the opcode, storing into Rd
@@ -274,7 +283,7 @@ module avr_cpu(
 		sel_Rd = op_Rd;
 
 		/*
-		 * Arithmetic instructions
+		 * Arithmetic instructions are only on the first cycle
 		 */
 		casez(opcode[15:10])
 		6'b0000_01: begin
@@ -467,9 +476,10 @@ module avr_cpu(
 			// NOP
 		end
 
-`ifdef NO0
 		// LDS rd,i  / STS i,rd
-		16'b1001_00??_????_0000:
+		if (opcode[15:10] == 6'b1001_00 && opcode[3:0] == 4'b0000)
+		begin
+			// 16'b1001_00??_????_0000:
 			// No sreg update
 			// 2 cycles
 			// Load or store instructions
@@ -477,6 +487,8 @@ module avr_cpu(
 			case(cycle)
 			2'b00: begin
 				// wait for the next read to get the address
+				// for a STS the op_Rd will load the correct
+				// register into reg_Ra by the next cycle
 				force_PC = 1;
 				next_cycle = 1;
 			end
@@ -485,7 +497,7 @@ module avr_cpu(
 				if (is_store) begin
 					// STS: write to that address
 					// no extra cycle required
-					next_wdata = regs[op_Rd];
+					next_wdata = reg_Ra;
 					next_wen = 1;
 				end else begin
 					// LDS: request a read of the addr
@@ -495,12 +507,16 @@ module avr_cpu(
 				end
 			end
 			2'b10: begin
-				// only LDS, store the data read
+				// only LDS, store the data read from const
+				alu_op = `OP_MOVR;
 				alu_store = 1;
-				alu_Rd = data_read;
+				alu_const = 1;
+				alu_const_value = data_read;
 			end
 			endcase
+		end
 
+`ifdef NO0
 		16'b1001_00??_????_1100,
 		16'b1001_00??_????_1101,
 		16'b1001_00??_????_1110:

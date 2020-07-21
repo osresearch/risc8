@@ -33,7 +33,7 @@ module avr_soc(
 	// data memory
 
 	wire [15:0] addr;
-	reg [7:0] ram_rdata;
+	reg [7:0] ram_data;
 	wire [7:0] wdata;
 	wire wen;
 	wire ren;
@@ -45,7 +45,7 @@ module avr_soc(
 	// it shadows the IO memory space below 64 bytes
 	always @(posedge clk)
 	begin
-		ram_rdata <= ram[addr[RAMBITS-1:0]];
+		ram_data <= ram[addr[RAMBITS-1:0]];
 		if (ren) begin
 			$display("RD %04x => %02x", addr, ram[addr[RAMBITS-1:0]]);
 		end
@@ -58,9 +58,9 @@ module avr_soc(
 
 	// IO mapped peripherals are at the bottom 64-bytes of RAM
 	// and require continuous assignment
-	wire io_sel = addr < 16'h0060;
+	reg io_sel;
 	wire [6:0] io_addr = addr[6:0];
-	reg  [7:0] io_rdata;
+	reg  [7:0] io_data;
 
 	reg [7:0] tcnt1 = 0;
 
@@ -79,21 +79,23 @@ module avr_soc(
 		end
 	end
 
-	// io reads are continuous assignment since they must be 
-	// available in a single cycle.  note that these are memory
+	// IO reads.  note that these are memory
 	// addresses, not IO port addresses
-	always @(*) begin
-		case(io_addr)
-		7'h36: io_rdata = pin_b;
-		7'h37: io_rdata = ddr_b;
-		7'h38: io_rdata = port_b;
+	always @(posedge clk) begin
+		io_sel <= 0;
 
-		7'h4F: io_rdata = tcnt1;
+		if (addr < 16'h0060) begin
+			io_sel <= 1;
+			case(io_addr)
+			7'h36: io_data <= pin_b;
+			7'h37: io_data <= ddr_b;
+			7'h38: io_data <= port_b;
 
-		default: io_rdata = io_addr;
-		endcase
-		//if (io_sel && ren)
-			//$display("IN %02x = %02x", io_addr, io_rdata);
+			7'h4F: io_data <= tcnt1;
+
+			default: io_data <= io_addr;
+			endcase
+		end
 	end
 
 	avr_cpu cpu(
@@ -106,7 +108,7 @@ module avr_soc(
 		.data_addr(addr),
 		.data_wen(wen),
 		.data_ren(ren),
-		.data_read(io_sel ? io_rdata : ram_rdata),
+		.data_read(io_sel ? io_data : ram_data),
 		.data_write(wdata)
 	);
 

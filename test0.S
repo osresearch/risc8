@@ -1,4 +1,6 @@
-nop
+ldi r20, 63
+sts 0x0aa5, r20
+lds r20, 0x0aa5
 ldi r24, 7
 ldi r25, 8
 mov r25, r24

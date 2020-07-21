@@ -204,6 +204,7 @@ module avr_cpu(
 			reg_PC <= next_PC;
 
 		reg_SP <= next_SP;
+		temp <= next_temp;
 		cycle <= next_cycle;
 		skip <=  next_skip;
 		prev_opcode <= opcode;
@@ -642,47 +643,54 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end
-
-`ifdef notyet
+		end else
 
 		// LPM/ELPM Rd, Z / Z+
-		16'b1001_000?_????_0100,
-		16'b1001_000?_????_0101:
+		if ((opcode[15:9] == 7'b1001_000 && (0
+		 ||  opcode[ 3:0] == 4'b0100 // Z
+		 ||  opcode[ 3:0] == 4'b0101 // Z+
+		)) || opcode[15:0] == 16'b1001010111001000)
+		begin
 			case(cycle)
 			2'b00: begin
+				// fetch the Z register
+				sel_Ra = BASE_Z;
+				next_cycle = 1;
+			end
+			2'b01: begin
+				// if this is Z+ mode, add one to Z
+				alu_op = `OP_ADW;
+				sel_Ra = BASE_Z;
+				sel_Rd = sel_Ra;
+				alu_store = 1;
+				alu_word = 1;
+				alu_const = 1;
+				alu_const_value = opcode[0];
+
 				// start a read of the program memory space
 				// storing the real next PC into the temp reg
 				// PC is in words, not bytes
-				next_cycle = 1;
 				force_PC = 1;
-				next_PC = reg_Z >> 1;
+				next_PC = reg_Ra >> 1;
 				next_temp = reg_PC;
-			end
-			2'b01: begin
-				// store the correct byte of read data,
-				// based on the bottom bit of Z
-				alu_store = 1;
-				alu_Rd = reg_Z[0] ? cdata[15:8] : cdata[7:0];
 				next_cycle = 2;
-
+			end
+			2'b10: begin
+				// store the correct byte of read data,
+				// based on the bottom bit of the original Z
+				alu_store = 1;
+				alu_op = `OP_MOVR;
+				alu_const = 1;
+				alu_const_value = reg_Ra[0] ? cdata[15:8] : cdata[7:0];
 				// and return to the program flow by
 				// reading the temp reg.
 				next_PC = temp;
 				force_PC = 1;
 			end
-			2'b10: begin
-				if(opcode[1:0] == 2'b01) begin
-					// Z+ addressing, 3 cycles
-					alu_store = 1;
-					alu_word = 1;
-					dest = BASE_Z;
-					alu_op = `OP_ADD;
-					alu_Rd = reg_Z;
-					alu_Rr = 1;
-				end
-			end
 			endcase
+		end
+
+`ifdef notyet
 
 /*
 		16'b1001001_?????_0100: begin

@@ -1,4 +1,17 @@
-ldi r20, 63
+ldi r26, 0x50 
+ldi r27, 0x09 
+ldi r20, 0x40 
+ldi r21, 0x41 
+ldi r22, 0x42 
+st X+, r20 
+st X+, r21
+st X+, r22
+st X, r20
+ld r19, -X
+ld r18, -X
+ld r17, -X
+ld r16, X
+
 sts 0x0aa5, r20
 lds r20, 0x0aa5
 ldi r24, 7

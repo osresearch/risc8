@@ -21,7 +21,7 @@ module top(
 	end
 
 	always begin
-		#10000
+		#1000
 		$finish;
 	end
 

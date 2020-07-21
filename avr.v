@@ -54,7 +54,7 @@ module avr_cpu(
 	wire [7:0] reg_Rb;
 
 
-	regfile regs(
+	regfile_ram regs(
 		.clk(clk),
 		.reset(reset),
 		// Read ports. Rd is 8 or 16 bits, Rr is always 8
@@ -185,7 +185,7 @@ module avr_cpu(
 		prev_alu_store <= 0;
 
 	end else begin
-		$display("%04x: %016b [%d]=%04x [%d]=%02x, %04x %x %02x = %04x => %d%s",
+		$display("%04x: %016b A[%d]=%04x B[%d]=%02x, %04x %x %02x = %04x => %d%s",
 			(reg_PC * 2) & 16'hFFFF,
 			opcode,
 			sel_Ra, reg_Ra,
@@ -257,7 +257,10 @@ module avr_cpu(
 		if (reset)
 			next_PC = 0;
 		else
+		if (cycle == 0)
 			next_PC = reg_PC + 1;
+		else
+			next_PC = reg_PC;
 
 		// most instructions are single cycle, no writes, no reads
 		next_cycle = 0;
@@ -514,51 +517,74 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end
+		end else
 
-`ifdef NO0
-		16'b1001_00??_????_1100,
-		16'b1001_00??_????_1101,
-		16'b1001_00??_????_1110:
+		if (opcode[15:10] == 6'b1001_00 &&
+		(opcode[3:0] == 4'b1100 || opcode[3:0] == 4'b1101 || opcode[3:0] == 4'b1110)) begin
+			//16'b1001_00??_????_1100,
+			//16'b1001_00??_????_1101,
+			//16'b1001_00??_????_1110:
 			// ST / LD Rd, X / X- / X+ (no sreg update)
 			case(cycle)
 			2'b00: begin
-				if (is_store) begin
-					// STS (no extra cycle needed)
-					next_wen = 1;
-					next_wdata = regs[op_Rd];
-				end else begin
-					// LD
-					next_ren = 1;
-					next_cycle = 1;
-				end
+				// wait for the full X register to fetch
+				// as well as the contents of Rd
+				sel_Ra = BASE_X;
+				sel_Rb = op_Rd;
+				next_cycle = 1;
 
-				dest = BASE_X;
-				alu_store = 1;
+				// setup an ALU operation to store a
+				// whole word back into X.
+				sel_Rd = BASE_X;
 				alu_word = 1;
-				alu_Rd = reg_X;
-				alu_Rr = 1;
+				alu_const = 1;
+				alu_const_value = 1;
 
 				case(opcode[1:0])
-				2'b00: next_addr = reg_X;
 				2'b01: begin
-					// post-increment
+					// post-increment the X register
 					alu_op = `OP_ADD;
-					next_addr = reg_X;
+					alu_store = 1;
 				end
 				2'b10: begin
-					// pre-decrement
+					// pre-decrement the X register
 					alu_op = `OP_SUB;
-					next_addr = reg_X - 1;
+					alu_store = 1;
 				end
 				endcase
 			end
 			2'b01: begin
-				// extra cycle only for LD to store into Rd
+				// X is in Ra, d is in Rb,
+				// for a pre-decrement, X-1 is in alu_out
+				if (opcode[1:0] == 2'b10)
+					next_addr = alu_out;
+				else
+					next_addr = reg_Ra;
+
+				if (is_store) begin
+					// STS (no extra cycle needed)
+					next_wen = 1;
+					next_wdata = reg_Rb;
+				end else begin
+					// LD (one more cycle required)
+					next_ren = 1;
+					next_cycle = 2;
+				end
+			end
+			2'b10: begin
+				// extra cycle only for LD
+				// the memory has loaded the value,
+				// so use the ALU to store into Rd
+				sel_Rd = op_Rd;
+				alu_op = `OP_MOVR;
 				alu_store = 1;
-				alu_Rd = data_read;
+				alu_const = 1;
+				alu_const_value = data_read;
 			end
 			endcase
+		end
+
+`ifdef notyet
 
 		// ST / LD Rd, Z+Q (no status update)
 		16'b10?0_????_????_0???:

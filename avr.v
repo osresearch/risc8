@@ -1,6 +1,26 @@
+/*
+ * RISC-8, a mostly AVR comptaible softcore.
+ *
+ * Two stage pipeline design, similar to the actual ATtiny85 architecture.
+ * Each clock can retire one instruction.
+ *
+ * First stage:
+ * - Receive opcode on input
+ * - Decode into registers required
+ * - Setup reads of those registers
+ * - Latch constant values and flags for next stage.
+ * - Latch destination register
+ *
+ * Second stage:
+ * - Route registers values or constant values to ALU
+ * - Setup write of ALU output
+ * 
+ */
 `ifndef _avr_cpu_v_
 `define _avr_cpu_v_
 `include "alu.v"
+`include "regfile.v"
+
 
 module avr_cpu(
 	input clk,
@@ -22,11 +42,33 @@ module avr_cpu(
 	localparam BASE_X = 26;
 	localparam BASE_Y = 28;
 	localparam BASE_Z = 30;
-	reg [7:0] regs[31:0];
-	//reg [7:0] regs[31:16];
-	wire [15:0] reg_X = { regs[BASE_X+1], regs[BASE_X] };
-	wire [15:0] reg_Y = { regs[BASE_Y+1], regs[BASE_Y] };
-	wire [15:0] reg_Z = { regs[BASE_Z+1], regs[BASE_Z] };
+
+	// The register file has a block ram underneath with a one-cycle
+	// delay to reads. This means that there is a two stage pipeline
+	// of decoding the existing instruction on one clock and loading
+	// the register, and then one clock to evaluate and retire it.
+	reg [5:0] sel_Ra;
+	reg [5:0] sel_Rb;
+	reg [5:0] sel_Rd;
+	wire [15:0] reg_Ra;
+	wire [7:0] reg_Rb;
+
+
+	regfile regs(
+		.clk(clk),
+		.reset(reset),
+		// Read ports. Rd is 8 or 16 bits, Rr is always 8
+		.a(sel_Ra),
+		.b(sel_Rb),
+		.Ra(reg_Ra),
+		.Rb(reg_Rb),
+		// write port, 8 or 16 bits, delayed by a clock for the ALU
+		.d(prev_sel_Rd),
+		.Rd(alu_out),
+		.write(prev_alu_store),
+		.write_word(prev_alu_word)
+	);
+
 	reg [15:0] temp;
 	reg [15:0] next_temp;
 	reg [15:0] reg_PC;
@@ -68,9 +110,14 @@ module avr_cpu(
 	assign data_write = next_wdata;
 
 	reg invalid_op;
-	reg [5:0] dest;
 	reg alu_store;
 	reg alu_word;
+	reg alu_carry;
+
+	// delayed by one cycle for the register file to finish loading
+	reg prev_alu_store;
+	reg prev_alu_word;
+	reg [5:0] prev_sel_Rd;
 
 	// opcode registers
 	wire [5:0] op_Rr = { opcode[9], opcode[3:0] }; // 0-31
@@ -102,15 +149,23 @@ module avr_cpu(
 
 	// ALU to perform the operations
 	wire [7:0] next_sreg;
-	reg [15:0] alu_Rd;
-	reg [7:0] alu_Rr;
 	reg [3:0] alu_op;
+	reg [3:0] prev_alu_op;
 	wire [15:0] alu_out;
+	reg [7:0] alu_const_value;
+	reg alu_const;
+	reg [7:0] prev_alu_const_value;
+	reg prev_alu_const;
+	wire [7:0] sreg_out;
+
+	wire [15:0] alu_Rd = reg_Ra;
+	wire [ 7:0] alu_Rr = prev_alu_const ? prev_alu_const_value : reg_Rb; // sometimes a constant value
 
 	alu avr_alu(
 		.clk(clk),
 		.reset(reset),
-		.op(alu_op),
+		.op(prev_alu_op),
+		.use_carry(alu_carry),
 		.Rd_in(alu_Rd),
 		.Rr_in(alu_Rr),
 		.R_out(alu_out),
@@ -127,40 +182,49 @@ module avr_cpu(
 		wen <= 0;
 		ren <= 0;
 		wdata <= 0;
-
-		regs[ 0] <= 0; regs[ 1] <= 0; regs[ 2] <= 0; regs[ 3] <= 0;
-		regs[ 4] <= 0; regs[ 5] <= 0; regs[ 6] <= 0; regs[ 7] <= 0;
-		regs[ 8] <= 0; regs[ 9] <= 0; regs[10] <= 0; regs[11] <= 0;
-		regs[12] <= 0; regs[13] <= 0; regs[14] <= 0; regs[15] <= 0;
-		regs[16] <= 0; regs[17] <= 0; regs[18] <= 0; regs[19] <= 0;
-		regs[20] <= 0; regs[21] <= 0; regs[22] <= 0; regs[23] <= 0;
-		regs[24] <= 0; regs[25] <= 0; regs[26] <= 0; regs[27] <= 0;
-		regs[28] <= 0; regs[29] <= 0; regs[30] <= 0; regs[31] <= 0;
+		prev_alu_store <= 0;
 
 	end else begin
+		$display("%04x: %016b [%d]=%04x [%d]=%02x, %04x %x %02x = %04x => %d%s",
+			(reg_PC * 2) & 16'hFFFF,
+			opcode,
+			sel_Ra, reg_Ra,
+			sel_Ra, reg_Rb,
+			alu_Rd,
+			alu_op,
+			alu_Rr,
+			alu_out,
+			sel_Rd,
+			alu_store ? " WRITE" : ""
+		);
+
 		// only advance the PC if we are not in
 		// a multi-cycle instruction and not a LPM
-		if (force_PC || next_cycle == 0)
+		if (force_PC || cycle == 0)
 			reg_PC <= next_PC;
 
 		reg_SP <= next_SP;
-		cycle <= next_cycle;
-		skip <= next_skip;
-		temp <= next_temp;
+		cycle <= 0;
+		skip <= 0;
 		prev_opcode <= opcode;
-		sreg <= next_sreg;
+		sreg <= sreg_out;
 
 		addr <= next_addr;
 		wen <= next_wen;
 		ren <= next_ren;
 		wdata <= next_wdata;
 
-		if (alu_store) begin
-			regs[dest] <= alu_out[7:0];
-			if (alu_word)
-				regs[dest|1] <= alu_out[15:8];
-		end
+		// Since the register file takes a cycle to read, update the actual destination
+		// to write into the register file on the following cycle, after the ALU has
+		// finished the operation.
+		prev_sel_Rd <= sel_Rd;
+		prev_alu_op <= alu_op;
+		prev_alu_store <= alu_store;
+		prev_alu_const <= alu_const;
+		prev_alu_const_value <= alu_const_value;
+		prev_alu_word <= alu_word;
 
+/*
 		//if (invalid_op)
 			$display("%04x.%d: %04x%s%s",
 				reg_PC * 2,
@@ -169,38 +233,11 @@ module avr_cpu(
 				skip ? " SKIP" : "",
 				invalid_op ? " INVALID": ""
 			);
-	end
+*/
 
-	always @(*)
-	begin
-		{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg;
-		force_PC = 0;
-		if (reset)
-			next_PC = 0;
-		else
-			next_PC = reg_PC + 1;
-		next_SP = reg_SP;
-		next_cycle = 0;
-		next_skip = 0;
-		next_temp = temp;
 
-		next_wdata = wdata;
-		next_addr = addr;
-		next_wen = 0;
-		next_ren = 0;
-
-		invalid_op = 0;
-
-		// Default is to not store, but if commiting to the register
-		// file is selected, then to store to the Rd value
-		alu_store = 0;
-		alu_word = 0;
-		dest = op_Rd;
-
-		alu_op = `OP_MOVE;
-		alu_Rd = regs[op_Rd];
-		alu_Rr = regs[op_Rr];
-
+/*
+	FIXME: skip multibyte instructions is currently broken
 		if (skip) begin
 			// only a few instructions require an extra skip
 			casez(opcode)
@@ -208,124 +245,231 @@ module avr_cpu(
 			16'b1001_010?_????_110?, // JMP abs22
 			16'b1001_00??_????_0000: // LDS/STS
 			begin
-				force_PC = 1;
-				next_cycle = 1;
-				next_skip = 1;
+				force_PC <= 1;
 			end
 			endcase
 		end else
-		casez(opcode)
-		16'b0000000000000000: begin
-			// NOP
-		end
-		16'b00000001_????_????: begin
-			// MOVW Rd,Rr Move register pair
-			dest = { opcode[7:4], 1'b0 };
-			alu_word = 1;
-			alu_store = 1;
-			alu_Rd = {
-				regs[{opcode[3:0], 1'b1 }],
-				regs[{opcode[3:0], 1'b0 }]
-			};
-		end
-		16'b0000_0011_0???_1???: begin
-			// MUL and FMUL, unimplemented
-			invalid_op = 1;
-		end
+*/
+	end
 
-		// 2-operand instructions
-		16'b000_0_01_?_?????_????: begin
+		// start pre-fetching the next PC
+	always @(*) begin
+		if (reset)
+			next_PC <= 0;
+		else
+			next_PC <= reg_PC + 1;
+
+
+		// Default is to not store, but if commiting to the register
+		// file is selected, then to store to the Rd value
+		alu_store = 0;
+		alu_word = 0;
+		alu_const = 0;
+		alu_carry = 0;
+
+		// default is to select the Rd and Rr from the opcode, storing into Rd
+		alu_op = `OP_MOVE;
+		sel_Ra = op_Rd;
+		sel_Rb = op_Rr;
+		sel_Rd = op_Rd;
+
+		/*
+		 * Arithmetic instructions
+		 */
+		casez(opcode[15:10])
+		6'b0000_01: begin
 			// CPC Rd,Rr (no dest, only sreg)
-			alu_op = `OP_SBC;
+			// 16'b0000_01_?_?????_????: begin
+			alu_op = `OP_SUB;
+			alu_carry = 1;
 		end
-		16'b000_1_01_?_?????_????: begin
+		6'b0001_01: begin
 			// CP Rd,Rr (no dest, only sreg)
 			alu_op = `OP_SUB;
 		end
-		16'b000010_?_?????_????: begin
+		6'b0000_10: begin
 			// SBC Rd,Rr
-			alu_op = `OP_SBC;
+			alu_op = `OP_SUB;
+			alu_carry = 1;
 			alu_store = 1;
 		end
-		16'b000110_?_?????_????: begin
+		6'b0001_10: begin
 			// SUB Rd,Rr
 			alu_op = `OP_SUB;
 			alu_store = 1;
 		end
-		16'b000_0_11_?_?????_????: begin
+		6'b0000_11: begin
 			alu_store = 1;
 			if (op_Rd == op_Rr)
 				alu_op = `OP_LSL; // LSL Rd when Rd=Rr
 			else
 				alu_op = `OP_ADD; // ADD Rd,Rr
 		end
-		16'b000_1_11_?_?????_????: begin
+		6'b0001_11: begin
 			alu_store = 1;
+			alu_carry = 1;
 			if (op_Rd == op_Rr)
 				alu_op = `OP_ROL; // ROL Rd when Rd=Rr
 			else
-				alu_op = `OP_ADC; // ADC Rd,Rr
+				alu_op = `OP_ADD; // ADC Rd,Rr
 		end
-
-		16'b0010_00??_????_????: begin
+		6'b0010_00: begin
 			// AND Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_AND;
 		end
-		16'b0010_01??_????_????: begin
+		6'b0010_01: begin
 			// EOR Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_EOR;
 		end
-		16'b0010_10??_????_????: begin
+		6'b0010_10: begin
 			// OR Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_OR;
 		end
-		16'b0010_11??_????_????: begin
+		6'b0010_11: begin
 			// MOV Rd,Rr (no sreg updates)
 			alu_store = 1;
 		end
-
-		// Register-immediate operations
-		16'b0011_????_????_????: begin
+		6'b0011_??: begin
 			// CPI Rd,K (only updates status register, so no dest)
 			alu_op = `OP_SUB;
-			alu_Rd = regs[op_Rdi];
-			alu_Rr = op_K;
-			alu_store = 1;
+			sel_Ra = op_Rdi;
+			alu_const_value = op_K;
+			alu_const = 1;
 		end
-		16'b0100_????_????_????: begin
+		6'b0100_??: begin
 			// SBCI Rd, K
-			alu_op = `OP_SBC;
-			alu_Rd = regs[op_Rdi];
-			alu_Rr = op_K;
+			alu_op = `OP_SUB;
+			alu_carry = 1;
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_const_value = op_K;
+			alu_const = 1;
 			alu_store = 1;
 		end
-		16'b0101_????_????_????: begin
+		6'b0101_??: begin
 			// SUBI Rd, K
 			alu_op = `OP_SUB;
-			alu_Rd = regs[op_Rdi];
-			alu_Rr = op_K;
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_const_value = op_K;
+			alu_const = 1;
 			alu_store = 1;
 		end
-		16'b0110_????_????_????: begin
+		6'b0110_??: begin
 			// ORI Rd,K or SBR Rd, K
 			alu_op = `OP_OR;
-			alu_Rd = regs[op_Rdi];
-			alu_Rr = op_K;
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_const_value = op_K;
+			alu_const = 1;
 			alu_store = 1;
 		end
-		16'b0111_????_????_????: begin
+		6'b0111_??: begin
 			// ANDI Rd,K or CBR Rd, K
 			alu_op = `OP_AND;
-			alu_Rd = regs[op_Rdi];
-			alu_Rr = op_K;
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_const_value = op_K;
+			alu_const = 1;
 			alu_store = 1;
 		end
+		endcase
 
+		/*
+		 * Misc arithmetic instructions
+		 */
+		if (opcode[15:9] == 7'b1001_010)
+		case(opcode[3:0])
+		4'b0000: begin
+			// COM Rd
+			//16'b1001_010_?????_0000: begin
+			alu_store = 1;
+			alu_op = `OP_EOR;
+			alu_const = 1;
+			alu_const_value = 8'hFF;
+		end
+		4'b0001: begin
+			// NEG Rd
+			// 16'b1001_010?_????_0001: begin
+			// TODO: FIX ME
+			alu_store = 1;
+			alu_op = `OP_SUB;
+			alu_const = 1;
+			alu_const_value = 8'h55;
+		end
+		4'b0010: begin
+			// SWAP Rd, no sreg updates
+			// 16'b1001_010?__????_0010: begin
+			// TODO: FIX ME
+			alu_store = 1;
+			alu_op = `OP_SUB;
+			//alu_Rd = { regs[op_Rd][3:0], regs[op_Rd][7:4] };
+		end
+		4'b0011: begin
+			// INC Rd
+			//16'b1001_010_?????_0011: begin
+			alu_store = 1;
+			alu_op = `OP_ADD;
+			alu_const = 1;
+			alu_const_value = 1;
+		end
+		4'b0101: begin
+			// ASR Rd
+			//16'b1001_010?_????_0101: begin
+			alu_store = 1;
+			alu_op = `OP_ASR;
+		end
+		4'b0110: begin
+			// LSR Rd
+			//16'b1001_010?_????_0110: begin
+			alu_store = 1;
+			alu_op = `OP_LSR;
+		end
+		4'b0111: begin
+			// ROR Rd
+			// 16'b1001_010?_????_0111: begin
+			alu_store = 1;
+			alu_op = `OP_ROR;
+		end
+		4'b1010: begin
+			// DEC Rd
+			// 16'b1001_010?_????_1010: begin
+			alu_store = 1;
+			alu_op = `OP_SUB;
+			alu_const = 1;
+			alu_const_value = 1;
+		end
+		endcase
+
+		if (opcode[15:8] == 8'b0000_0001) begin
+			// MOVW Rd,Rr Move register pair
+			// 16'b0000_0001_????_????: begin
+			sel_Ra = { opcode[3:0], 1'b0 }; // will read both bytes
+			sel_Rd = { opcode[7:4], 1'b0 }; // will write both bytes
+			alu_word = 1;
+			alu_store = 1;
+		end else
+		if (opcode[15:12] == 4'b1110) begin
+			// LDI Rdi, K (no sreg updates)
+			// 16'b1110_????_????_????: begin
+			sel_Rd = op_Rdi;
+			sel_Ra = op_Rd;
+			alu_op = `OP_MOVR;
+			alu_store = 1;
+			alu_const = 1;
+			alu_const_value = op_K;
+		end
+
+		if (opcode == 16'b0000000000000000) begin
+			// NOP
+		end
+
+`ifdef NO0
 		// LDS rd,i  / STS i,rd
-		16'b100100_?_?????_0000:
+		16'b1001_00??_????_0000:
 			// No sreg update
 			// 2 cycles
 			// Load or store instructions
@@ -569,52 +713,12 @@ module avr_cpu(
 
 		// One operand instructions
 
-		// COM Rd
-		16'b1001010_?????_0000: begin
-			alu_store = 1;
-			alu_op = `OP_SUB;
-			alu_Rd = 8'hFF;
-			alu_Rr = regs[op_Rd];
-		end
-
-		// NEG Rd
-		16'b1001010_?????_0001: begin
-			alu_store = 1;
-			alu_op = `OP_SUB;
-			alu_Rd = 8'h00;
-			alu_Rr = regs[op_Rd];
-		end
-
-		// SWAP Rd, no sreg updates
-		16'b1001010_?????_0010: begin
-			alu_store = 1;
-			alu_Rd = { regs[op_Rd][3:0], regs[op_Rd][7:4] };
-		end
-
 /*
 		// RESERVED
 		16'b1001010_?????_0100: begin
 			invalid_op = 1;
 		end
 */
-		// ASR Rd
-		16'b1001010_?????_0101: begin
-			alu_store = 1;
-			alu_op = `OP_ASR;
-		end
-
-		// LSR Rd
-		16'b1001010_?????_0110: begin
-			alu_store = 1;
-			alu_op = `OP_LSR;
-		end
-
-		// ROR Rd
-		16'b1001_010?_????_0111: begin
-			alu_store = 1;
-			alu_op = `OP_ROR;
-		end
-
 		// CLx Status register clear bit
 		16'b1001_0100_1???_1000: begin
 			(* full_case *)
@@ -712,19 +816,6 @@ module avr_cpu(
 */
 		// misc instructions
 
-		// DEC Rd
-		16'b1001010_?????_1010: begin
-			alu_store = 1;
-			alu_op = `OP_SUB;
-			alu_Rr = 1;
-		end
-
-		// INC Rd
-		16'b1001010_?????_0011: begin
-			alu_store = 1;
-			alu_op = `OP_ADD;
-			alu_Rr = 1;
-		end
 /*
 		16'b10010100_????_1011: begin
 			// DES round k
@@ -905,11 +996,6 @@ module avr_cpu(
 			end
 			endcase
 
-		// LDI Rd, K (no sreg updates)
-		16'b1110_????_????_????: begin
-			alu_store = 1;
-			alu_Rd = op_K;
-		end
 
 /*
 		16'b111110_?_?????_0_???: begin
@@ -925,6 +1011,7 @@ module avr_cpu(
 			invalid_op = 1;
 		end
 		endcase
+`endif
 	end
 endmodule
 

@@ -1,21 +1,20 @@
 `ifndef _alu_v_
 `define _alu_v_
 
-`define OP_ADD	4'h0
-`define OP_ADC	4'h1 // must be OP_ADD | 1
-`define OP_SUB	4'h2
-`define OP_SBC	4'h3 // must be OP_SUB | 1
+`define OP_MOVE	4'h0
+`define OP_MOVR	4'h1
+`define OP_ADD	4'h2
+`define OP_SUB	4'h3
 `define OP_ADW	4'h4
 `define OP_SBW	4'h5 // must be OP_ADW | 1
 `define OP_LSR	4'h6
-`define OP_ROR	4'h7 // must be OP_LSR | 1
-`define OP_LSL	4'h8
-`define OP_ASR	4'h9
+`define OP_LSL	4'h7
+`define OP_ASR	4'h8
+`define OP_ROR	4'h9 // must be OP_ASR | 1
 `define OP_ROL	4'hA
 `define OP_AND	4'hB
 `define OP_OR	4'hC
 `define OP_EOR	4'hD
-`define OP_MOVE	4'hE
 
 module alu(
 	input clk,
@@ -25,6 +24,7 @@ module alu(
 	input [7:0] Rr_in,
 	input [7:0] sreg_in, // carry in
 	input [3:0] op,
+	input use_carry,
 
 	output [15:0] R_out, // full word output register
 	output [7:0] sreg_out
@@ -47,10 +47,11 @@ module alu(
 	wire R3 = R_out[3];
 	wire R7 = R_out[7];
 	wire R15 = R_out[15];
-	wire C = sreg_in[0]; // Carry
+	wire C = sreg_in[0];
+	wire opt_C = use_carry ? C : 0; // Optional Carry
 
 	always @(*) begin
-		{Rh, R} = 0;
+		{Rh, R} = Rd_in;
 		{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg_in;
 
 		// most operations use these values
@@ -60,14 +61,14 @@ module alu(
 		SV = SN^SC;
 
 		case(op)
-		`OP_ADD, `OP_ADC: begin
-			R = Rd + Rr + (op[0] ? C : 0);
+		`OP_ADD: begin
+			R = Rd + Rr + opt_C;
 			SC = !R15 & Rdh7;
 			SV = !Rdh7 & R15;
 			SN = R15;
 		end
-		`OP_SUB, `OP_SBC: begin
-			R = Rd - Rr - (op[0] ? C : 0);
+		`OP_SUB: begin
+			R = Rd - Rr - opt_C;
 			SH = !Rd3 & Rr3 | Rr3 & R3 | R3 & !Rd3;
 			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
 			SN = R7;
@@ -94,7 +95,7 @@ module alu(
 			SC = Rd7;
 		end
 		`OP_ROL: begin
-			// ROL Rd when Rd=Rr
+			// ROL Rd (through carray)
 			R = { Rd[6:0], C };
 			SH = Rd3;
 			SC = Rd7;
@@ -130,7 +131,15 @@ module alu(
 			{Rh,R} = Rd_in;
 			{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg_in;
 		end
+		`OP_MOVR: begin
+			// Do not modify any SREG
+			Rh = 0;
+			R = Rr;
+			{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg_in;
+		end
 		endcase
+
+		//$display("%d: %02x (%1x) %02x = %02x", clk, Rd, op, Rr, R);
 	end
 
 endmodule

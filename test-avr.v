@@ -1,6 +1,6 @@
 `default_nettype none
 
-`define AVR_PROGRAM "blink.hex"
+`define AVR_PROGRAM "test0.hex"
 
 `include "soc.v"
 

@@ -480,7 +480,8 @@ module avr_cpu(
 		end
 
 		// LDS rd,i  / STS i,rd
-		if (opcode[15:10] == 6'b1001_00 && opcode[3:0] == 4'b0000)
+		if (opcode[15:10] == 6'b1001_00
+		&&  opcode[ 3: 0] == 4'b0000)
 		begin
 			// 16'b1001_00??_????_0000:
 			// No sreg update
@@ -519,43 +520,56 @@ module avr_cpu(
 			endcase
 		end else
 
-		if (opcode[15:10] == 6'b1001_00 &&
-		(opcode[3:0] == 4'b1100 || opcode[3:0] == 4'b1101 || opcode[3:0] == 4'b1110)) begin
-			//16'b1001_00??_????_1100,
-			//16'b1001_00??_????_1101,
-			//16'b1001_00??_????_1110:
-			// ST / LD Rd, X / X- / X+ (no sreg update)
+		if ((opcode[15:10] == 6'b1001_00 && (0
+		 ||  opcode[3:0] == 4'b1110 // -X
+		 ||  opcode[3:0] == 4'b1101 // X+
+		 ||  opcode[3:0] == 4'b1010 // -Y
+		 ||  opcode[3:0] == 4'b1001 // Y+
+		 ||  opcode[3:0] == 4'b0010 // -Z
+		 ||  opcode[3:0] == 4'b0001 // Z+
+		))
+		|| (opcode[15:10] == 6'b1000_00 && (0
+		 ||  opcode[3:0] == 4'b1100 // X
+		 ||  opcode[3:0] == 4'b1000 // Y
+		 ||  opcode[3:0] == 4'b0000 // z
+		))) begin
+			case(opcode[3:2])
+			2'b00: sel_Ra = BASE_Z;
+			2'b10: sel_Ra = BASE_Y;
+			2'b11: sel_Ra = BASE_X;
+			endcase
+
+			sel_Rb = op_Rd;
+			sel_Rd = sel_Ra;
+
 			case(cycle)
 			2'b00: begin
-				// wait for the full X register to fetch
+				// wait for the full X/Z register to fetch
 				// as well as the contents of Rd
-				sel_Ra = BASE_X;
-				sel_Rb = op_Rd;
 				next_cycle = 1;
 
 				// setup an ALU operation to store a
-				// whole word back into X.
-				sel_Rd = BASE_X;
+				// whole word back into X/Z
 				alu_word = 1;
 				alu_const = 1;
 				alu_const_value = 1;
 
 				case(opcode[1:0])
 				2'b01: begin
-					// post-increment the X register
-					alu_op = `OP_ADD;
+					// post-increment the register word
+					alu_op = `OP_ADW;
 					alu_store = 1;
 				end
 				2'b10: begin
-					// pre-decrement the X register
-					alu_op = `OP_SUB;
+					// pre-decrement the register word
+					alu_op = `OP_SBW;
 					alu_store = 1;
 				end
 				endcase
 			end
 			2'b01: begin
-				// X is in Ra, d is in Rb,
-				// for a pre-decrement, X-1 is in alu_out
+				// pointer word is in Ra, d is in Rb,
+				// for a pre-decrement, pointer-1 is in alu_out
 				if (opcode[1:0] == 2'b10)
 					next_addr = alu_out;
 				else
@@ -582,97 +596,55 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
+		end else
+
+		// ST / LD Rd, Y/Z+Q (no status update)
+		if (opcode[15:14] == 2'b10
+		&&  opcode[   12] == 1'b0) begin
+			// Z+Q: 16'b10?0_????_????_0???:
+			// Y+Q: 16'b10?0_????_????_1???:
+			case(cycle)
+			2'b00: begin
+				// wait for the full Y or Z register,
+				// with the immediate value added
+				// to fetch as well as the contents of Rd
+				sel_Ra = opcode[3] ? BASE_Y : BASE_Z;
+				sel_Rb = op_Rd;
+
+				alu_op = `OP_ADW;
+				alu_const = 1;
+				alu_const_value = op_Q;
+				
+				next_cycle = 1;
+			end
+			2'b01: begin
+				// reg + Q is in the alu, d is in Rb,
+				next_addr = alu_out;
+
+				if (is_store) begin
+					// STS (no extra cycle needed)
+					next_wen = 1;
+					next_wdata = reg_Rb;
+				end else begin
+					// LD (one more cycle required)
+					next_ren = 1;
+					next_cycle = 2;
+				end
+			end
+			2'b10: begin
+				// extra cycle only for LD
+				// the memory has loaded the value,
+				// so use the ALU to store into Rd
+				sel_Rd = op_Rd;
+				alu_op = `OP_MOVR;
+				alu_store = 1;
+				alu_const = 1;
+				alu_const_value = data_read;
+			end
+			endcase
 		end
 
 `ifdef notyet
-
-		// ST / LD Rd, Z+Q (no status update)
-		16'b10?0_????_????_0???:
-			case(cycle)
-			2'b00: begin
-				if (is_store) begin
-					// ST instruction
-					next_wen = 1;
-					next_wdata = regs[op_Rd];
-				end else begin
-					// LD instruction
-					next_cycle = 1;
-					next_ren = 1;
-				end
-
-				next_addr = reg_Z + op_Q;
-			end
-			2'b01: begin
-				alu_store = 1;
-				alu_Rd = data_read;
-			end
-			endcase
-
-		// ST / LD Rd, -Z / Z+ (no sreg update)
-		16'b1001_00??_????_0001,
-		16'b1001_00??_????_0010:
-			case(cycle)
-			2'b00: begin
-				if (is_store) begin
-					// ST instruction
-					next_wen = 1;
-					next_wdata = regs[op_Rd];
-				end else begin
-					// LD instruction
-					next_ren = 1;
-					next_cycle = 1;
-				end
-
-				case(opcode[1:0])
-				2'b01: begin
-					// post increment
-					alu_store = 1;
-					alu_word = 1;
-					dest = BASE_Z;
-					alu_op = `OP_ADD;
-					alu_Rd = reg_Z;
-					alu_Rr = 1;
-					next_addr = reg_Z;
-				end
-				2'b10: begin
-					// predecrement
-					alu_store = 1;
-					alu_word = 1;
-					dest = BASE_Z;
-					alu_op = `OP_SUB;
-					alu_Rd = reg_Z;
-					alu_Rr = 1;
-					next_addr = reg_Z - 1;
-				end
-				endcase
-			end
-			2'b01: begin
-				alu_store = 1;
-				alu_Rd = data_read;
-			end
-			endcase
-
-		// ST / LD Rd, Y+Q (no sreg update)
-		16'b10?0_????_????_1???:
-			case(cycle)
-			2'b00: begin
-				if (is_store) begin
-					// ST instruction
-					next_wen = 1;
-					next_wdata = regs[op_Rd];
-				end else begin
-					// LD instruction
-					next_cycle = 1;
-					next_ren = 1;
-				end
-
-				next_addr = reg_Y + op_Q;
-			end
-			2'b01: begin
-				alu_store = 1;
-				alu_Rd = data_read;
-			end
-			endcase
 
 		// LPM/ELPM Rd, Z / Z+
 		16'b1001_000?_????_0100,

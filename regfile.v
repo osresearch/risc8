@@ -41,9 +41,6 @@ module regfile_ram(
 	wire [4:0] b_word = b[5:1];
 	wire [4:0] d_word = d[5:1];
 
-	always @(negedge clk)
-		$display("----");
-
 	assign Ra = a_high ? { 8'h00, Ra_ram[15:8] } : Ra_ram[15:0];
 	assign Rb = b_high ? Rb_ram[15:8] : Rb_ram[7:0];
 	
@@ -54,27 +51,29 @@ module regfile_ram(
 		Ra_ram <= ram_a[a_word];
 		Rb_ram <= ram_b[b_word];
 
+/*
 		if (write)
 			$display("R[%d]=%04x R[%d]=%02x R[%d]<=%04x", a, Ra, b, Rb, d, Rd);
 		else
 			$display("READ %d=%04x %d=%04x", a, ram_a[a_word], b, ram_b[b_word]);
 		//$display("r20=%04x %04x", Rb_ram, ram_b[13]);
+*/
 
 		if (write) begin
 			if (write_word) begin
 				// assume aligned write
-				$display("WRITE %d word <= %04x", d_word, Rd);
+				//$display("WRITE %d word <= %04x", d_word, Rd);
 				ram_a[d_word][15:0] <= Rd;
 				ram_b[d_word][15:0] <= Rd;
 			end else
 			if (d[0]) begin
 				// high byte write
-				$display("WRITE %d high <= %02x", d_word, Rd);
+				//$display("WRITE %d high <= %02x", d_word, Rd);
 				ram_a[d_word][15:8] <= Rd[7:0];
 				ram_b[d_word][15:8] <= Rd[7:0];
 			end else begin
 				// low byte write
-				$display("WRITE %d low <= %02x", d_word, Rd);
+				//$display("WRITE %d low <= %02x", d_word, Rd);
 				ram_a[d_word][7:0] <= Rd[7:0];
 				ram_b[d_word][7:0] <= Rd[7:0];
 			end
@@ -163,9 +162,9 @@ module regfile(
 			end
 		end
 */
-		if (a == d)
+		if (cache_valid && a == d)
 			Ra = Rd;
-		if (b == d)
+		if (cache_valid && b == d)
 			Rb = Rd;
 	end
 endmodule

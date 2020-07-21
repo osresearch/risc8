@@ -33,9 +33,9 @@ module regfile_ram(
 	initial $readmemh("zero.hex", ram_b);
 
 	reg [15:0] Ra_ram;
-	reg [ 7:0] Rb_ram;
-	wire [15:0] Ra = a[0] ? { 8'h0, Ra_ram[15:8] } : Ra_ram;
-	wire [ 7:0] Rb = b[0] ? Rb_ram[15:8] : Rb_ram[7:0];
+	reg [15:0] Rb_ram;
+	reg a_high;
+	reg b_high;
 
 	wire [4:0] a_word = a[5:1];
 	wire [4:0] b_word = b[5:1];
@@ -44,19 +44,28 @@ module regfile_ram(
 	always @(negedge clk)
 		$display("----");
 
+	assign Ra = a_high ? { 8'h00, Ra_ram[15:8] } : Ra_ram[15:0];
+	assign Rb = b_high ? Rb_ram[15:8] : Rb_ram[7:0];
+	
+
 	always @(posedge clk) if (!reset) begin
+		a_high <= a[0];
+		b_high <= b[0];
 		Ra_ram <= ram_a[a_word];
 		Rb_ram <= ram_b[b_word];
+
 		if (write)
 			$display("R[%d]=%04x R[%d]=%02x R[%d]<=%04x", a, Ra, b, Rb, d, Rd);
 		else
-			$display("R[%d]=%04x R[%d]=%02x", a, Ra, b, Rb);
+			$display("READ %d=%04x %d=%04x", a, ram_a[a_word], b, ram_b[b_word]);
+		//$display("r20=%04x %04x", Rb_ram, ram_b[13]);
 
 		if (write) begin
 			if (write_word) begin
 				// assume aligned write
-				ram_a[d_word] <= Rd;
-				ram_b[d_word] <= Rd;
+				$display("WRITE %d word <= %04x", d_word, Rd);
+				ram_a[d_word][15:0] <= Rd;
+				ram_b[d_word][15:0] <= Rd;
 			end else
 			if (d[0]) begin
 				// high byte write
@@ -141,6 +150,7 @@ module regfile(
 		Ra = Ra_ram;
 		Rb = Rb_ram;
 
+/*
 		if (cache_valid) begin
 			// assume no word writes
 			if (a == cache_d) begin
@@ -152,6 +162,11 @@ module regfile(
 				Rb = cache_Rd;
 			end
 		end
+*/
+		if (a == d)
+			Ra = Rd;
+		if (b == d)
+			Rb = Rd;
 	end
 endmodule
 

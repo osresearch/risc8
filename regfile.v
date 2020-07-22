@@ -144,20 +144,15 @@ module regfile(
 		end
 	end
 
+	// TODO:
 	// Handle un-aligned reads of the word-oriented block rams
 	// with matching the last written word
 	always @(*) begin
-		if (write && a == d)
-			Ra = Rd;
-		else
 		if (cache_valid && cache_d == a)
 			Ra = cache_Rd;
 		else
 			Ra = Ra_ram;
 
-		if (write && b == d)
-			Rb = Rd;
-		else
 		if (cache_valid && cache_d == b)
 			Rb = cache_Rd;
 		else

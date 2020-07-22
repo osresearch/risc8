@@ -156,7 +156,8 @@ module avr_cpu(
 	reg [7:0] prev_alu_const_value;
 	reg alu_const;
 	reg prev_alu_const;
-	wire [7:0] next_sreg;
+	reg [7:0] next_sreg;
+	wire [7:0] sreg_out;
 
 	wire [15:0] alu_Rd = reg_Ra;
 	wire [ 7:0] alu_Rr = prev_alu_const ? prev_alu_const_value : reg_Rb; // sometimes a constant value
@@ -170,7 +171,7 @@ module avr_cpu(
 		.Rr_in(alu_Rr),
 		.R_out(alu_out),
 		.sreg_in(sreg),
-		.sreg_out(next_sreg)
+		.sreg_out(sreg_out)
 	);
 
 	always @(posedge clk) if (reset) begin
@@ -220,8 +221,10 @@ module avr_cpu(
 		ren <= next_ren;
 		wdata <= next_wdata;
 
-		// Since the register file takes a cycle to read, update the actual destination
-		// to write into the register file on the following cycle, after the ALU has
+		// Since the register file takes a cycle to
+		// read, update the actual destination
+		// to write into the register file on the
+		// following cycle, after the ALU has
 		// finished the operation.
 		prev_sel_Rd <= sel_Rd;
 		prev_alu_op <= alu_op;
@@ -230,33 +233,6 @@ module avr_cpu(
 		prev_alu_const <= alu_const;
 		prev_alu_const_value <= alu_const_value;
 		prev_alu_word <= alu_word;
-
-/*
-		//if (invalid_op)
-			$display("%04x.%d: %04x%s%s",
-				reg_PC * 2,
-				cycle,
-				opcode,
-				skip ? " SKIP" : "",
-				invalid_op ? " INVALID": ""
-			);
-*/
-
-
-/*
-	FIXME: skip multibyte instructions is currently broken
-		if (skip) begin
-			// only a few instructions require an extra skip
-			casez(opcode)
-			16'b1001_010?_????_111?, // CALL abs22
-			16'b1001_010?_????_110?, // JMP abs22
-			16'b1001_00??_????_0000: // LDS/STS
-			begin
-				force_PC <= 1;
-			end
-			endcase
-		end else
-*/
 	end
 
 	/* Instruction decoding */
@@ -392,6 +368,7 @@ module avr_cpu(
 			next_PC = reg_PC + 1;
 
 		// most instructions are single cycle, no writes, no reads
+		next_sreg = sreg_out;
 		next_cycle = 0;
 		next_skip = 0;
 		next_ren = 0;
@@ -881,57 +858,6 @@ module avr_cpu(
 			end
 			endcase
 		end
-/*
-		16'b1001010100011000: begin
-			// RETI
-			invalid_op = 1;
-		end
-		16'b10010101001x1000: begin
-			// RESERVED
-			invalid_op = 1;
-		end
-		16'b1001010101??1000: begin
-			// RESERVED
-			invalid_op = 1;
-		end
-		16'b1001010110001000: begin
-			// SLEEP
-			invalid_op = 1;
-		end
-		16'b1001010110011000: begin
-			// BREAK
-			invalid_op = 1;
-		end
-		16'b1001010110101000: begin
-			// WDR
-			invalid_op = 1;
-		end
-		16'b1001010110111000: begin
-			// RESERVED
-			invalid_op = 1;
-		end
-		16'b10010101110_?_1000: begin
-			// LPM/ELPM
-			invalid_op = 1;
-		end
-		16'b1001010111101000: begin
-			// SPM
-			invalid_op = 1;
-		end
-		16'b1001010111111000: begin
-			// SPM X+
-			invalid_op = 1;
-		end
-
-*/
-		// misc instructions
-
-/*
-		16'b10010100_????_1011: begin
-			// DES round k
-			invalid_op = 1;
-		end
-*/
 
 		// CPSE Rd,Rr (no sreg updates)
 		if(is_cpse) begin
@@ -1070,36 +996,30 @@ module avr_cpu(
 			endcase
 		end
 
-`ifdef notyet
-/*
-		16'b100110_?_0_?????_???: begin
-			// CBI/SBI a,b (clear/set IO bit)
-			invalid_op = 1;
-		end
-		16'b100110_?_1_?????_???: begin
-			// SBIC/SBIS a,b (IO bit test)
-			invalid_op = 1;
-		end
-		16'b100111_?_?????_????: begin
-			// MUL unsigned R1:R0 = Rr*Rd
-			invalid_op = 1;
-		end
-*/
 		// OUT to IO space (no sreg update)
 		// the ones for registers are handled here,
 		// otherwise the external controller will handle it
 		if (is_out) begin
 			// 16'b1011_1???_????_????: begin
-			next_wen = 1;
-			next_wdata = alu_Rd;
-			next_addr = io_addr + 8'h20;
+			case(cycle)
+			2'b00: begin
+				// wait for Rd to show up in Ra
+				next_cycle = 1;
+			end
+			2'b01: begin
+				next_wen = 1;
+				next_wdata = reg_Ra;
+				next_addr = io_addr + 8'h20;
 
-			case(io_addr)
-			6'h3D: next_SP[ 7:0] = alu_Rd;
-			6'h3E: next_SP[15:8] = alu_Rd;
-			6'h3F: { SI, ST, SH, SS, SV, SN, SZ, SC } = alu_Rd;
-			default: begin
-				// nothing to do here; SOC handles it
+				case(io_addr)
+				6'h3D: next_SP[ 7:0] = reg_Ra;
+				6'h3E: next_SP[15:8] = reg_Ra;
+				6'h3F: next_sreg = reg_Ra;
+				default: begin
+					// nothing to do here;
+					// the SOC handles it
+				end
+				endcase
 			end
 			endcase
 		end
@@ -1109,30 +1029,26 @@ module avr_cpu(
 		// the external SOC will handle it.
 		if (is_in) begin
 			// 16'b1011_0???_????_????: begin
-			alu_store = 1;
-			next_addr = io_addr + 8'h20;
-			next_ren = 1;
-
-			case(io_addr)
-			6'h3D: alu_Rd = reg_SP[ 7:0];
-			6'h3E: alu_Rd = reg_SP[15:8];
-			6'h3F: alu_Rd = sreg;
-			default: alu_Rd = data_read; // from the SOC
+			case(cycle)
+			2'b00: begin
+				next_addr = io_addr + 8'h20;
+				next_ren = 1;
+				next_cycle = 1;
+			end
+			2'b01: begin
+				alu_op = `OP_MOVR;
+				alu_store = 1;
+				alu_const = 1;
+				case(io_addr)
+				6'h3D: alu_const_value = reg_SP[ 7:0];
+				6'h3E: alu_const_value = reg_SP[15:8];
+				6'h3F: alu_const_value = sreg;
+				default: alu_const_value = data_read; // from the SOC
+				endcase
+			end
 			endcase
 		end
-
-/*
-		16'b111110_?_?????_0_???: begin
-			// BLD/BST register bit to STATUS.T
-			invalid_op = 1;
-		end
-*/
-		16'b11111_??_?????_1_???: begin
-			// RESERVED
-			invalid_op = 1;
-		end
-`endif
-	end
+	end // skip
 	end
 endmodule
 

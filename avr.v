@@ -149,7 +149,6 @@ module avr_cpu(
 	wire [5:0] immw6 = { opcode[7:6], opcode[3:0] };
 
 	// ALU to perform the operations
-	wire [7:0] next_sreg;
 	reg [3:0] alu_op;
 	reg [3:0] prev_alu_op;
 	wire [15:0] alu_out;
@@ -157,7 +156,7 @@ module avr_cpu(
 	reg [7:0] prev_alu_const_value;
 	reg alu_const;
 	reg prev_alu_const;
-	wire [7:0] sreg_out;
+	wire [7:0] next_sreg;
 
 	wire [15:0] alu_Rd = reg_Ra;
 	wire [ 7:0] alu_Rr = prev_alu_const ? prev_alu_const_value : reg_Rb; // sometimes a constant value
@@ -179,6 +178,7 @@ module avr_cpu(
 		skip <= 0;
 		reg_PC <= 0;
 		reg_SP <= 16'h1000;
+		sreg <= 0;
 		addr <= 0;
 		wen <= 0;
 		ren <= 0;
@@ -187,9 +187,10 @@ module avr_cpu(
 
 	end else begin
 		if (cycle == 0)
-		$display("%04x: %04x A[%d]=%04x B[%d]=%02x, %04x %x %02x = %04x => %d%s",
+		$display("%04x: %04x %02x A[%d]=%04x B[%d]=%02x, %04x %x %02x = %04x => %d%s%s",
 			reg_PC * 16'h2,
 			opcode,
+			sreg,
 			sel_Ra, reg_Ra,
 			sel_Ra, reg_Rb,
 			alu_Rd,
@@ -197,7 +198,8 @@ module avr_cpu(
 			alu_Rr,
 			alu_out,
 			sel_Rd,
-			alu_store ? " WRITE" : ""
+			alu_store ? " WRITE" : "",
+			skip ? " SKIP" : ""
 		);
 
 		// only advance the PC if we are not in
@@ -206,11 +208,11 @@ module avr_cpu(
 			reg_PC <= next_PC;
 
 		reg_SP <= next_SP;
+		sreg <= next_sreg;
 		temp <= next_temp;
 		cycle <= next_cycle;
 		skip <=  next_skip;
 		prev_opcode <= opcode;
-		sreg <= sreg_out;
 
 		addr <= next_addr;
 		wen <= next_wen;
@@ -376,10 +378,12 @@ module avr_cpu(
 		if (opcode[15:8] == 8'b1001_0100
 		&&  opcode[ 3:0] == 4'b1000)
 			is_clx_or_sex = 1;
-
 	end
 
+	/*******************************/
+
 	always @(*) begin
+
 		// start pre-fetching the next PC
 		if (reset)
 			next_PC = 0;
@@ -388,6 +392,7 @@ module avr_cpu(
 
 		// most instructions are single cycle, no writes, no reads
 		next_cycle = 0;
+		next_skip = 0;
 		next_ren = 0;
 		next_wen = 0;
 		next_addr = 0;
@@ -411,64 +416,76 @@ module avr_cpu(
 		sel_Rb = op_Rr;
 		sel_Rd = op_Rd;
 
+		if (skip) begin
+			// only a few instructions are multiple
+			// bytes.  Otherwise we only skip one PC.
+			if (is_call
+			|| is_jmp
+			|| is_lds) begin
+				force_PC = 1;
+				next_cycle = 1;
+				next_skip = 1;
+			end
+		end else begin
+
 		if (is_cpc) begin
 			// CPC Rd,Rr (no dest, only sreg)
 			// 16'b0000_01_?_?????_????: begin
 			alu_op = `OP_SUB;
 			alu_carry = 1;
-		end else
+		end
 		if (is_cp) begin
 			// CP Rd,Rr (no dest, only sreg)
 			alu_op = `OP_SUB;
-		end else
+		end
 		if (is_sbc) begin
 			// SBC Rd,Rr
 			alu_op = `OP_SUB;
 			alu_carry = 1;
 			alu_store = 1;
-		end else
+		end
 		if (is_sub) begin
 			// SUB Rd,Rr
 			alu_op = `OP_SUB;
 			alu_store = 1;
-		end else
+		end
 		if (is_add) begin
 			// ADD Rd,Rr / LSL Rd when Rd=Rr
 			alu_store = 1;
 			alu_op = `OP_ADD;
-		end else
+		end
 		if (is_adc) begin
 			// ADC Rd,Rr / ROL Rd when Rd=Rr
 			alu_store = 1;
 			alu_carry = 1;
 			alu_op = `OP_ADD;
-		end else
+		end
 		if (is_and) begin
 			// AND Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_AND;
-		end else
+		end
 		if (is_eor) begin
 			// EOR Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_EOR;
-		end else
+		end
 		if (is_or) begin
 			// OR Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_OR;
-		end else
+		end
 		if (is_mov) begin
 			// MOV Rd,Rr (no sreg updates)
 			alu_store = 1;
-		end else
+		end
 		if (is_cpi) begin
 			// CPI Rd,K (only updates status register, so no dest)
 			alu_op = `OP_SUB;
 			sel_Ra = op_Rdi;
 			alu_const_value = op_K;
 			alu_const = 1;
-		end else
+		end
 		if (is_sbci) begin
 			// SBCI Rd, K
 			alu_op = `OP_SUB;
@@ -478,7 +495,7 @@ module avr_cpu(
 			alu_const_value = op_K;
 			alu_const = 1;
 			alu_store = 1;
-		end else
+		end
 		if (is_subi) begin
 			// SUBI Rd, K
 			alu_op = `OP_SUB;
@@ -487,7 +504,7 @@ module avr_cpu(
 			alu_const_value = op_K;
 			alu_const = 1;
 			alu_store = 1;
-		end else
+		end
 		if (is_ori) begin
 			// ORI Rd,K or SBR Rd, K
 			alu_op = `OP_OR;
@@ -496,7 +513,7 @@ module avr_cpu(
 			alu_const_value = op_K;
 			alu_const = 1;
 			alu_store = 1;
-		end else
+		end
 		if (is_andi) begin
 			// ANDI Rd,K or CBR Rd, K
 			alu_op = `OP_AND;
@@ -505,27 +522,27 @@ module avr_cpu(
 			alu_const_value = op_K;
 			alu_const = 1;
 			alu_store = 1;
-		end else
+		end
 		if (is_com) begin
 			// COM Rd
 			alu_store = 1;
 			alu_op = `OP_EOR;
 			alu_const = 1;
 			alu_const_value = 8'hFF;
-		end else
+		end
 		if (is_neg) begin
 			// NEG Rd
 			// 16'b1001_010?_????_0001: begin
 			alu_store = 1;
 			alu_op = `OP_NEG;
-		end else
+		end
 		if (is_swap) begin
 			// SWAP Rd, no sreg updates
 			// 16'b1001_010?__????_0010: begin
 			alu_store = 1;
 			alu_op = `OP_SWAP;
 			//alu_Rd = { regs[op_Rd][3:0], regs[op_Rd][7:4] };
-		end else
+		end
 		if (is_inc) begin
 			// INC Rd
 			//16'b1001_010_?????_0011: begin
@@ -533,23 +550,23 @@ module avr_cpu(
 			alu_op = `OP_ADD;
 			alu_const = 1;
 			alu_const_value = 1;
-		end else
+		end
 		if (is_asr) begin
 			// ASR Rd
 			alu_store = 1;
 			alu_op = `OP_ASR;
-		end else
+		end
 		if (is_lsr) begin
 			// LSR Rd
 			alu_store = 1;
 			alu_op = `OP_LSR;
-		end else
+		end
 		if (is_ror) begin
 			// ROR Rd
 			// 16'b1001_010?_????_0111: begin
 			alu_store = 1;
 			alu_op = `OP_ROR;
-		end else
+		end
 		if (is_dec) begin
 			// DEC Rd
 			// 16'b1001_010?_????_1010: begin
@@ -557,7 +574,7 @@ module avr_cpu(
 			alu_op = `OP_SUB;
 			alu_const = 1;
 			alu_const_value = 1;
-		end else
+		end
 		if (is_adiw_or_sbiw) begin
 			// ADIW/SBIW Rp, uimm6
 			sel_Ra = op_Rp;
@@ -571,14 +588,14 @@ module avr_cpu(
 				alu_op = `OP_SBW;
 			else
 				alu_op = `OP_ADW;
-		end else
+		end
 		if (is_movw) begin
 			// MOVW Rd,Rr Move register pair
 			sel_Ra = { opcode[3:0], 1'b0 }; // will read both bytes
 			sel_Rd = { opcode[7:4], 1'b0 }; // will write both bytes
 			alu_word = 1;
 			alu_store = 1;
-		end else
+		end
 		if (is_ldi) begin
 			// LDI Rdi, K (no sreg updates)
 			sel_Rd = op_Rdi;
@@ -586,10 +603,10 @@ module avr_cpu(
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = op_K;
-		end else
+		end
 		if (is_nop) begin
 			// NOP. relax!
-		end else
+		end
 		if (is_lds) begin
 			// LDS rd,i  / STS i,rd
 			// No sreg update
@@ -626,7 +643,7 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end else
+		end
 		if (is_ld_xyz) begin
 			case(opcode[3:2])
 			2'b00: sel_Ra = BASE_Z;
@@ -691,7 +708,7 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end else
+		end
 		if (is_ld_yz_plus_q) begin
 			// ST / LD Rd, Y/Z+Q (no status update)
 			// Z+Q: 16'b10?0_????_????_0???:
@@ -735,7 +752,7 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end else
+		end
 		if (is_lpm) begin
 			// LPM/ELPM Rd, Z / Z+
 			case(cycle)
@@ -775,7 +792,7 @@ module avr_cpu(
 				force_PC = 1;
 			end
 			endcase
-		end else
+		end
 
 /*
 		16'b1001001_?????_0100: begin
@@ -811,7 +828,7 @@ module avr_cpu(
 				next_wdata = reg_Ra;
 			end
 			endcase
-		end else
+		end
 
 		if (is_pop) begin
 			// POP Rd
@@ -830,7 +847,7 @@ module avr_cpu(
 				alu_const_value = data_read;
 			end
 			endcase
-		end else
+		end
 
 		if (is_clx_or_sex) begin
 			// Status register update bit
@@ -840,7 +857,7 @@ module avr_cpu(
 			alu_carry = opcode[7];
 			alu_const = 1;
 			alu_const_value = opcode[6:4];
-		end else
+		end
 
 		if (is_ret) begin
 			// RET
@@ -862,7 +879,7 @@ module avr_cpu(
 				next_PC = { temp[7:0], data_read };
 			end
 			endcase
-		end else
+		end
 /*
 		16'b1001010100011000: begin
 			// RETI
@@ -923,7 +940,7 @@ module avr_cpu(
 			else
 			if (reg_Ra == reg_Rb)
 				next_skip = 1;
-		end else
+		end
 
 		// SBRC/SBRS skip if register bit b equals B
 		if (is_sbrc_or_sbrs) begin
@@ -934,7 +951,7 @@ module avr_cpu(
 			else
 			if (reg_Ra[opcode[2:0]] == opcode[9])
 				next_skip = 1;
-		end else
+		end
 
 		// BRBS/BRBC - Branch if bit in SREG is set/clear
 		if (is_brbc_or_brbs) begin
@@ -942,7 +959,7 @@ module avr_cpu(
 			// 16'b1111_01??_????_????: // BRBC
 			if (sreg[opcode[2:0]] != opcode[9])
 				next_PC = reg_PC + simm7 + 1;
-		end else
+		end
 
 		if (is_jmp) begin
 			// JMP abs22, 3 cycles
@@ -964,7 +981,7 @@ module avr_cpu(
 				// should be ready
 			end
 			endcase
-		end else
+		end
 
 		if (is_call) begin
 			// CALL abs22
@@ -999,7 +1016,7 @@ module avr_cpu(
 				next_PC = temp;
 			end
 			endcase
-		end else
+		end
 
 		if (is_ijmp) begin
 			// IJMP Z - Indirect jump/call to Z or EIND:Z
@@ -1014,14 +1031,14 @@ module avr_cpu(
 				next_PC = reg_Ra;
 			end
 			endcase
-		end else
+		end
 
 		if (is_rjmp) begin
 			// RJMP to PC + simm12
 			// 16'b1100_????????????:
 			// 2 cycles
 			next_PC = reg_PC + simm12 + 1;
-		end else
+		end
 
 		if (is_rcall) begin
 			// RCALL to PC + simm12
@@ -1050,7 +1067,7 @@ module avr_cpu(
 				force_PC = 1;
 			end
 			endcase
-		end else
+		end
 
 `ifdef notyet
 /*
@@ -1084,7 +1101,7 @@ module avr_cpu(
 				// nothing to do here; SOC handles it
 			end
 			endcase
-		end else
+		end
 
 		// IN from IO space (no sreg update, should be 1 cycle)
 		// the registers ones are handled here, otherwise
@@ -1101,7 +1118,7 @@ module avr_cpu(
 			6'h3F: alu_Rd = sreg;
 			default: alu_Rd = data_read; // from the SOC
 			endcase
-		end else
+		end
 
 /*
 		16'b111110_?_?????_0_???: begin
@@ -1114,9 +1131,7 @@ module avr_cpu(
 			invalid_op = 1;
 		end
 `endif
-		begin
-			invalid_op = 1;
-		end
+	end
 	end
 endmodule
 

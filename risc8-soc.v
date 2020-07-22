@@ -65,7 +65,7 @@ module risc8_soc(
 
 	// io writes are on the rising edge of the clock
 	always @(posedge clk) begin
-		//tcnt1 <= tcnt1 + 1;
+		tcnt1 <= tcnt1 + 1;
 		io_sel <= 0;
 
  		if ((wen | ren) && (addr < 16'h0060)) begin
@@ -87,11 +87,7 @@ module risc8_soc(
 				7'h37: io_data <= ddr_b;
 				7'h38: io_data <= port_b;
 
-				7'h4F: begin
-					io_data <= tcnt1;
-					tcnt1 <= tcnt1 + 1;
-				end
-
+				7'h4F: io_data <= tcnt1;
 				default: io_data <= io_addr;
 				endcase
 			end

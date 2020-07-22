@@ -51,50 +51,50 @@ module avr_soc(
 		end
 
 		if (wen) begin
-			//$display("WR %04x <= %02x", addr, wdata);
+			$display("WR %04x <= %02x", addr, wdata);
 			ram[addr[RAMBITS-1:0]] <= wdata;
 		end
 	end
 
 	// IO mapped peripherals are at the bottom 64-bytes of RAM
-	// and require continuous assignment
 	reg io_sel;
 	wire [6:0] io_addr = addr[6:0];
 	reg  [7:0] io_data;
 
-	reg [7:0] tcnt1 = 0;
+	reg [7:0] tcnt1 = 8'h55;
 
 	// io writes are on the rising edge of the clock
 	always @(posedge clk) begin
-		tcnt1 <= tcnt1 + 1;
-
-		if (wen && io_sel) begin
-			//$display("IO %02x <= %02x", io_addr, wdata);
-			case(io_addr)
-			7'h37: ddr_b <= wdata;
-			7'h38: port_b <= wdata;
-
-			7'h4F: tcnt1 <= wdata;
-			endcase
-		end
-	end
-
-	// IO reads.  note that these are memory
-	// addresses, not IO port addresses
-	always @(posedge clk) begin
+		//tcnt1 <= tcnt1 + 1;
 		io_sel <= 0;
 
-		if (addr < 16'h0060) begin
+ 		if ((wen | ren) && (addr < 16'h0060)) begin
 			io_sel <= 1;
-			case(io_addr)
-			7'h36: io_data <= pin_b;
-			7'h37: io_data <= ddr_b;
-			7'h38: io_data <= port_b;
+			if (wen) begin
+				$display("IO %02x <= %02x", io_addr, wdata);
+				case(io_addr)
+				7'h37: ddr_b <= wdata;
+				7'h38: port_b <= wdata;
 
-			7'h4F: io_data <= tcnt1;
+				7'h4F: tcnt1 <= wdata;
+				endcase
+			end
 
-			default: io_data <= io_addr;
-			endcase
+			if (ren) begin
+				$display("IO %02x", io_addr);
+				case(io_addr)
+				7'h36: io_data <= pin_b;
+				7'h37: io_data <= ddr_b;
+				7'h38: io_data <= port_b;
+
+				7'h4F: begin
+					io_data <= tcnt1;
+					tcnt1 <= tcnt1 + 1;
+				end
+
+				default: io_data <= io_addr;
+				endcase
+			end
 		end
 	end
 

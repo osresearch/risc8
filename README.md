@@ -1,6 +1,6 @@
-# RISC-8B softcore
+# RISC-8 softcore
 
-The RISC-8B is a small 8-bit CPU that is mostly compatible with the
+The RISC-8 is a small 8-bit CPU that is mostly compatible with the
 [AVR instruction set](http://ww1.microchip.com/downloads/en/devicedoc/atmel-0856-avr-instruction-set-manual.pdf).
 It does not have 100% of the architecture implemented, although
 enough to run many `avr-gcc` compiled programs in the soft-core.
@@ -8,7 +8,7 @@ enough to run many `avr-gcc` compiled programs in the soft-core.
 Sometimes you want all the power of a 32-bit RISC-V like Claire's
 [picorv32](https://github.com/cliffordwolf/picorv32), although sometimes
 you want faster synthesis times (9 seconds vs 45 seconds) and to use
-fewer FPGA resources (1200 LC vs 4500 LC).
+fewer FPGA resources (1200 LC vs 4500 LC), and the 8-bit CPU isn't a limitation.
 
 ## CPU overview
 

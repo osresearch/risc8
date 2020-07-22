@@ -1,10 +1,10 @@
-`ifndef _avr_soc_v_
-`define _avr_soc_v_
+`ifndef _risc8_soc_v_
+`define _risc8_soc_v_
 
 `default_nettype none
-`include "avr.v"
+`include "risc8-core.v"
 
-module avr_soc(
+module risc8_soc(
 	input clk,
 	input reset,
 
@@ -22,8 +22,8 @@ module avr_soc(
 	reg [15:0] code[0:(1 << CODEBITS) - 1];
 	reg [15:0] cdata;
 	wire [15:0] pc;
-`ifdef AVR_PROGRAM
-	initial $readmemh(`AVR_PROGRAM, code);
+`ifdef RISC8_PROGRAM
+	initial $readmemh(`RISC8_PROGRAM, code);
 `endif
 
 	always @(posedge clk)
@@ -98,7 +98,7 @@ module avr_soc(
 		end
 	end
 
-	avr_cpu cpu(
+	risc8_core core(
 		.clk(clk),
 		.reset(reset),
 

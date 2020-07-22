@@ -16,13 +16,13 @@
  * - Setup write of ALU output
  * 
  */
-`ifndef _avr_cpu_v_
-`define _avr_cpu_v_
-`include "alu.v"
+`ifndef _risc8_core_v_
+`define _risc8_core_v_
+`include "risc8-alu.v"
 `include "regfile.v"
 
 
-module avr_cpu(
+module risc8_core(
 	input clk,
 	input reset,
 
@@ -162,7 +162,7 @@ module avr_cpu(
 	wire [15:0] alu_Rd = reg_Ra;
 	wire [ 7:0] alu_Rr = prev_alu_const ? prev_alu_const_value : reg_Rb; // sometimes a constant value
 
-	alu avr_alu(
+	risc8_alu core_alu(
 		.clk(clk),
 		.reset(reset),
 		.op(prev_alu_op),

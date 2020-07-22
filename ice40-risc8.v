@@ -1,6 +1,6 @@
 `default_nettype none
-`define AVR_PROGRAM "blink.hex"
-`include "soc.v"
+`define RISC8_PROGRAM "blink.hex"
+`include "risc8-soc.v"
 
 module top(
 	output led_r,
@@ -30,7 +30,7 @@ module top(
 	wire [7:0] ddr_b;
 	reg [7:0] pin_b = 0;
 
-	avr_soc cpu(
+	risc8_soc cpu(
 		.clk(clk),
 		.reset(reset),
 

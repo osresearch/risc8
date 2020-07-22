@@ -1,8 +1,16 @@
-`ifndef _alu_v_
-`define _alu_v_
+/*
+ * Combinatorial 8-bit ALU
+ *
+ * This implements a simple 8-bit ALU with status register flags,
+ * as definied in the AVR instruction datasheet.
+ *
+ * Ra can be 8 or 16-bits, Rb is only 8 bits.
+ */
+`ifndef _risc8_alu_v_
+`define _risc8_alu_v_
 
-`define OP_MOVE	4'h0
-`define OP_MOVR	4'h1
+`define OP_MOVE	4'h0 // Copy the input Ra word to the output
+`define OP_MOVR	4'h1 // Copy the input Rb byte to the output
 `define OP_ADD	4'h2
 `define OP_SUB	4'h3
 `define OP_ADW	4'h4
@@ -15,9 +23,9 @@
 `define OP_AND	4'hB
 `define OP_OR	4'hC
 `define OP_EOR	4'hD
-`define OP_SREG	4'hE
+`define OP_SREG	4'hE // Update the SREG flags, uses carry input for set/clear
 
-module alu(
+module risc8_alu(
 	input clk,
 	input reset,
 
@@ -153,10 +161,11 @@ module alu(
 			endcase
 		end
 		`OP_MOVE: begin
+			// Default will copy {R,Rh} <= Rd
 			// Do not modify any SREG
-			{Rh,R} = Rd_in;
 		end
 		`OP_MOVR: begin
+			// Copy the Rb input byte to the output
 			// Do not modify any SREG
 			Rh = 0;
 			R = Rr;

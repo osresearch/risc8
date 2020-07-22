@@ -1,8 +1,8 @@
 `default_nettype none
 
-`define AVR_PROGRAM "test0.hex"
+`define RISC8_PROGRAM "test1.hex"
 
-`include "soc.v"
+`include "risc8-soc.v"
 
 module top(
 );
@@ -10,7 +10,7 @@ module top(
 	reg reset;
 
 	initial begin
-		$dumpfile("test-avr.vcd");
+		$dumpfile("test-risc8.vcd");
 		$dumpvars(0,top);
 		clk = 0;
 		reset = 1;
@@ -21,7 +21,7 @@ module top(
 	end
 
 	always begin
-		#1000
+		#24000
 		$finish;
 	end
 
@@ -32,7 +32,7 @@ module top(
 	//always @(posedge clk)
 		//$display("PORTB %02x", port_b);
 
-	avr_soc cpu(
+	risc8_soc cpu(
 		.clk(clk),
 		.reset(reset),
 

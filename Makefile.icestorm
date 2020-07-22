@@ -1,6 +1,6 @@
 DEVICE-upduino ?= up5k
 FOOTPRINT-upduino ?= sg48
-PIN_SRC-upduino ?= upduino_v2.pcf
+PIN_SRC-upduino ?= ../up5k/upduino_v2.pcf
 
 DEVICE-icebreaker ?= up5k
 FOOTPRINT-icebreaker ?= sg48
@@ -25,14 +25,14 @@ PIN_SRC := $(PIN_SRC-$(BOARD))
 PNR ?= $(ICEPATH)nextpnr-ice40
 .SECONDARY:
 
-%.flash: %.bin
+%.flash: %.bit
 	$(ICEPATH)iceprog -e 128 # Force a reset
 	$(ICEPATH)iceprog $<
 	echo $(USB_DEV) | tee /sys/bus/usb/drivers/ftdi_sio/bind
 	sleep 1
 	-stty -F /dev/ttyUSB0 1:0:1cbd:0:3:1c:7f:15:4:5:1:0:11:13:1a:0:12:f:17:16:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
 
-%.bin: %.asc
+%.bit: %.asc
 	$(ICEPATH)icepack $< $@
 
 %.json: %.v
@@ -54,7 +54,7 @@ PNR ?= $(ICEPATH)nextpnr-ice40
 %.gui: %.json
 	$(PNR) --gui --$(DEVICE) --pcf $(PIN_SRC) --json $<
 
-%.bin: %.asc
+%.bit: %.asc
 	cp $< $<.new
 	for bram in $(filter %.hex,$^); do \
 		echo "Replacing $$bram" ; \

@@ -187,18 +187,19 @@ module avr_cpu(
 
 	end else begin
 		if (cycle == 0)
-		$display("%04x: %04x %02x A[%d]=%04x B[%d]=%02x, %04x %x %02x = %04x => %d%s%s",
+		$display("%04x: %04x %02x A[%d]=%04x B[%d]=%02x, %04x %x %02x %b = %04x => %d%s%s",
 			reg_PC * 16'h2,
 			opcode,
 			sreg,
 			sel_Ra, reg_Ra,
-			sel_Ra, reg_Rb,
+			sel_Rb, reg_Rb,
 			alu_Rd,
-			alu_op,
+			prev_alu_op,
 			alu_Rr,
+			prev_alu_carry,
 			alu_out,
-			sel_Rd,
-			alu_store ? " WRITE" : "",
+			prev_sel_Rd,
+			prev_alu_store ? " WRITE" : "",
 			skip ? " SKIP" : ""
 		);
 
@@ -478,13 +479,14 @@ module avr_cpu(
 		if (is_mov) begin
 			// MOV Rd,Rr (no sreg updates)
 			alu_store = 1;
+			alu_op = `OP_MOVR;
 		end
 		if (is_cpi) begin
 			// CPI Rd,K (only updates status register, so no dest)
 			alu_op = `OP_SUB;
 			sel_Ra = op_Rdi;
-			alu_const_value = op_K;
 			alu_const = 1;
+			alu_const_value = op_K;
 		end
 		if (is_sbci) begin
 			// SBCI Rd, K
@@ -501,9 +503,9 @@ module avr_cpu(
 			alu_op = `OP_SUB;
 			sel_Ra = op_Rdi;
 			sel_Rd = op_Rdi;
-			alu_const_value = op_K;
-			alu_const = 1;
 			alu_store = 1;
+			alu_const = 1;
+			alu_const_value = op_K;
 		end
 		if (is_ori) begin
 			// ORI Rd,K or SBR Rd, K
@@ -541,7 +543,6 @@ module avr_cpu(
 			// 16'b1001_010?__????_0010: begin
 			alu_store = 1;
 			alu_op = `OP_SWAP;
-			//alu_Rd = { regs[op_Rd][3:0], regs[op_Rd][7:4] };
 		end
 		if (is_inc) begin
 			// INC Rd
@@ -626,7 +627,7 @@ module avr_cpu(
 				if (is_store) begin
 					// STS: write to that address
 					// no extra cycle required
-					next_wdata = reg_Ra;
+					next_wdata = reg_Ra[7:0];
 					next_wen = 1;
 				end else begin
 					// LDS: request a read of the addr
@@ -825,7 +826,7 @@ module avr_cpu(
 				next_wen = 1;
 				next_addr = reg_SP;
 				next_SP = reg_SP - 1;
-				next_wdata = reg_Ra;
+				next_wdata = reg_Ra[7:0];
 			end
 			endcase
 		end
@@ -935,10 +936,10 @@ module avr_cpu(
 		// CPSE Rd,Rr (no sreg updates)
 		if(is_cpse) begin
 			// wait for Rd and Rr to be available
-			if (cycle == 0)
+			if (cycle == 0) begin
 				next_cycle = 1;
-			else
-			if (reg_Ra == reg_Rb)
+			end else
+			if (reg_Ra[7:0] == reg_Rb)
 				next_skip = 1;
 		end
 

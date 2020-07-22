@@ -999,6 +999,8 @@ module avr_cpu(
 		// OUT to IO space (no sreg update)
 		// the ones for registers are handled here,
 		// otherwise the external controller will handle it
+		// should be single cycle, except that reading
+		// the register now takes a cycle
 		if (is_out) begin
 			// 16'b1011_1???_????_????: begin
 			case(cycle)

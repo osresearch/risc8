@@ -124,14 +124,15 @@ module risc8_core(
 	wire [5:0] op_Rr = { opcode[9], opcode[3:0] }; // 0-31
 	wire [5:0] op_Rd = opcode[8:4]; // 0-31
 	wire [5:0] op_Rdi = { 1'b1, opcode[7:4] }; // 16-31
- 	wire [5:0] op_Rp = { opcode[5:4], 3'b000 };
+ 	wire [5:0] op_Rp = { opcode[5:4], 3'b000 }; // 24-30
 	wire [7:0] op_K = { opcode[11:8], opcode[3:0] };
 	wire [5:0] op_Q = { opcode[13], opcode[15:14], opcode[2:0] };
+
 	// IN and OUT instructions
 	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
 
 	// LD vs ST is in the 9th bit
-	wire is_store = opcode[9];
+	wire op_is_store = opcode[9];
 
 	// sign extended 12-bit value
 	wire [15:0] simm12 = {
@@ -243,6 +244,7 @@ module risc8_core(
 	reg is_ldi, is_lpm, is_push, is_pop, is_com, is_neg, is_swap;
 	reg is_inc, is_asr, is_lsr, is_ror, is_ijmp, is_dec, is_jmp, is_call;
 	reg is_adiw_or_sbiw, is_ld_yz_plus_q, is_ret, is_clx_or_sex;
+	reg is_mulu;
 
 	always @(*) begin
 		is_nop = 0; is_movw = 0; is_cpc = 0; is_sbc = 0; is_add = 0;
@@ -255,106 +257,75 @@ module risc8_core(
 		is_inc = 0; is_asr = 0; is_lsr = 0; is_ror = 0; is_ijmp = 0;
 		is_dec = 0; is_jmp = 0; is_jmp = 0; is_call = 0; is_ret = 0;
 		is_adiw_or_sbiw = 0; is_ld_yz_plus_q = 0; is_clx_or_sex = 0;
+		is_mulu = 0;
 
-		case(opcode[15:0])
-		16'b0000000000000000: is_nop = 1;
-		16'b1001010100001000: is_ret = 1;
-		16'b1001010111001000: is_lpm = 1;
-		endcase
-
-		case(opcode[15:10])
-		6'b0000_01: is_cpc = 1;
-		6'b0000_10: is_sbc = 1;
-		6'b0000_11: is_add = 1; // also LSL
-		6'b0001_00: is_cpse = 1;
-		6'b0001_01: is_cp = 1;
-		6'b0001_10: is_sub = 1;
-		6'b0001_11: is_adc = 1; // also ROL
-		6'b0010_00: is_and = 1;
-		6'b0010_01: is_eor = 1;
-		6'b0010_10: is_or = 1;
-		6'b0010_11: is_mov = 1;
-		6'b1000_00: begin
-			case(opcode[3:0])
-			4'b0000: is_ld_xyz = 1; // z
-			4'b1000: is_ld_xyz = 1; // Y
-			4'b1100: is_ld_xyz = 1; // X
+		/*
+		 * Match instructions on every bit except for the
+		 * five Rd bits (opcode[8:4]), which are wildcard
+		 * for almost every instruction.
+		 */
+		casez({opcode[15:9],opcode[3:0]})
+		//11'b0000_000_0000: if (op_Rd == 5'b0000) is_nop = 1;
+		11'b0000_000_????: if (opcode[8] == 1'b1) is_movw = 1;
+		11'b0000_01?_????: is_cpc = 1;
+		11'b0000_10?_????: is_sbc = 1;
+		11'b0000_11?_????: is_add = 1; // also LSL
+		11'b0001_00?_????: is_cpse = 1;
+		11'b0001_01?_????: is_cp = 1;
+		11'b0001_10?_????: is_sub = 1;
+		11'b0001_11?_????: is_adc = 1; // also ROL
+		11'b0010_00?_????: is_and = 1;
+		11'b0010_01?_????: is_eor = 1;
+		11'b0010_10?_????: is_or = 1;
+		11'b0010_11?_????: is_mov = 1;
+		11'b0011_???_????: is_cpi = 1;
+		11'b0100_???_????: is_sbci = 1;
+		11'b0101_???_????: is_subi = 1;
+		11'b0110_???_????: is_ori = 1;
+		11'b0111_???_????: is_andi = 1;
+		11'b1001_00?_0000: is_lds = 1;
+		11'b1001_000_010?: is_lpm = 1; // Z
+		11'b1000_00?_0000: is_ld_xyz = 1; // z
+		11'b1000_00?_1000: is_ld_xyz = 1; // Y
+		11'b1000_00?_1100: is_ld_xyz = 1; // X
+		11'b1001_00?_0001: is_ld_xyz = 1; // Z+
+		11'b1001_00?_0010: is_ld_xyz = 1; // -Z
+		11'b1001_00?_1001: is_ld_xyz = 1; // Y+
+		11'b1001_00?_1010: is_ld_xyz = 1; // -Y
+		11'b1001_00?_1101: is_ld_xyz = 1; // X+
+		11'b1001_00?_1110: is_ld_xyz = 1; // -X
+		11'b10?0_???_????: is_ld_yz_plus_q = 1;
+		11'b1001_000_1111: is_pop = 1;
+		11'b1001_001_1111: is_push = 1;
+		11'b1001_010_0000: is_com = 1;
+		11'b1001_010_0001: is_neg = 1;
+		11'b1001_010_0010: is_swap = 1;
+		11'b1001_010_0011: is_inc = 1;
+		//11'b1001_010?_0100: is_nop = 1; // reserved
+		11'b1001_010_0101: is_asr = 1;
+		11'b1001_010_0110: is_lsr = 1;
+		11'b1001_010_0111: is_ror = 1;
+		11'b1001_010_1000: begin
+			casez(opcode[8:4])
+			5'b0????: is_clx_or_sex = 1;
+			5'b10000: is_ret = 1;
+			5'b11100: is_lpm = 1;
 			endcase
 		end
-		6'b1001_00: begin
-			case(opcode[3:0])
-			4'b0000: is_lds = 1;
-			4'b0001: is_ld_xyz = 1; // Z+
-			4'b0010: is_ld_xyz = 1; // -Z
-			4'b1001: is_ld_xyz = 1; // Y+
-			4'b1010: is_ld_xyz = 1; // -Y
-			4'b1101: is_ld_xyz = 1; // X+
-			4'b1110: is_ld_xyz = 1; // -X
-			endcase
-		end
-		6'b1111_00: is_brbc_or_brbs = 1;
-		6'b1111_01: is_brbc_or_brbs = 1;
-		6'b1111_11: if (opcode[3] == 0) is_sbrc_or_sbrs = 1;
+		11'b1001_010_1001: is_ijmp = 1;
+		11'b1001_010_1010: is_dec = 1;
+		11'b1001_010_110?: is_jmp = 1;
+		11'b1001_010_1111: is_call = 1;
+		11'b1001_011_????: is_adiw_or_sbiw = 1;
+		//12'b1001_11??_????: is_mulu = 1; // need to infer multiply
+		11'b1011_0??_????: is_in = 1;
+		11'b1011_1??_????: is_out = 1;
+		11'b1100_???_????: is_rjmp = 1;
+		11'b1101_???_????: is_rcall = 1;
+		11'b1110_???_????: is_ldi = 1; // also SER, with all 1
+		11'b1111_0??_????: is_brbc_or_brbs = 1;
+		11'b1111_11?_0???: is_sbrc_or_sbrs = 1;
 		endcase
-
-		case(opcode[15:11])
-		5'b1011_0: is_in = 1;
-		5'b1011_1: is_out = 1;
-		endcase
-
-		case(opcode[15:12])
-		4'b0011: is_cpi = 1;
-		4'b0100: is_sbci = 1;
-		4'b0101: is_subi = 1;
-		4'b0110: is_ori = 1;
-		4'b0111: is_andi = 1;
-		4'b1100: is_rjmp = 1;
-		4'b1101: is_rcall = 1;
-		4'b1110: is_ldi = 1; // also SER, with all 1
-		endcase
-
-		case(opcode[15:9])
-		7'b0000_000: if (opcode[8]) is_movw = 1;
-		7'b1001_000: begin
-			case(opcode[3:0])
-			4'b0100: is_lpm = 1; // Z
-			4'b0101: is_lpm = 1; // Z+
-			endcase
-		end
-		7'b1001_001: begin
-			case(opcode[3:0])
-			4'b1111: is_push = 1;
-			4'b1111: is_pop = 1;
-			endcase
-		end
-		7'b1001_010: begin
-			case(opcode[3:0])
-			4'b0000: is_com = 1;
-			4'b0001: is_neg = 1;
-			4'b0010: is_swap = 1;
-			4'b0011: is_inc = 1;
-			// 4'b0100: is_nop = 1; // reserved
-			4'b0101: is_asr = 1;
-			4'b0110: is_lsr = 1;
-			4'b0111: is_ror = 1;
-			4'b1001: is_ijmp = 1;
-			4'b1010: is_dec = 1;
-			4'b1100: is_jmp = 1;
-			4'b1101: is_jmp = 1;
-			4'b1110: is_call = 1;
-			4'b1111: is_call = 1;
-			endcase
-		end
-		7'b1001_011: is_adiw_or_sbiw = 1;
-		endcase
-
-		if (opcode[15:14] == 2'b10
-		&&  opcode[   12] == 1'b0)
-			is_ld_yz_plus_q = 1;
-
-		if (opcode[15:8] == 8'b1001_0100
-		&&  opcode[ 3:0] == 4'b1000)
-			is_clx_or_sex = 1;
 	end
 
 	/*******************************/
@@ -437,6 +408,13 @@ module risc8_core(
 			alu_store = 1;
 			alu_carry = 1;
 			alu_op = `OP_ADD;
+		end
+		if (is_mulu) begin
+			// MULU Rd, Rr => R1/R0
+			alu_op = `OP_MUL;
+			alu_store = 1;
+			alu_word = 1;
+			sel_Rd = 0;
 		end
 		if (is_and) begin
 			// AND Rd,Rr
@@ -601,7 +579,7 @@ module risc8_core(
 			end
 			2'b01: begin
 				next_addr = cdata;
-				if (is_store) begin
+				if (op_is_store) begin
 					// STS: write to that address
 					// no extra cycle required
 					next_wdata = reg_Ra[7:0];
@@ -665,7 +643,7 @@ module risc8_core(
 				else
 					next_addr = reg_Ra;
 
-				if (is_store) begin
+				if (op_is_store) begin
 					// STS (no extra cycle needed)
 					next_wen = 1;
 					next_wdata = reg_Rb;
@@ -709,7 +687,7 @@ module risc8_core(
 				// reg + Q is in the alu, d is in Rb,
 				next_addr = alu_out;
 
-				if (is_store) begin
+				if (op_is_store) begin
 					// STS (no extra cycle needed)
 					next_wen = 1;
 					next_wdata = reg_Rb;

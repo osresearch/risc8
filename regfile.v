@@ -60,6 +60,7 @@ module regfile_ram(
 */
 
 		if (write) begin
+			$display("R[%d] = %04x", d, Rd);
 			if (write_word) begin
 				// assume aligned write
 				//$display("WRITE %d word <= %04x", d_word, Rd);
@@ -127,45 +128,40 @@ module regfile(
 	// If the register being read matches the last one written,
 	// replay it from the input buffer instead of from the BRAM.
 	reg [15:0] cache_Rd;
-	reg [5:0] cache_d;
+	reg [15:0] cache_Ra;
+	reg [ 7:0] cache_Rb;
+	reg [ 5:0] cache_d;
 	reg cache_valid;
-	reg cache_word;
 
 	always @(posedge clk) begin
-		cache_valid <= 0;
-
-		if (!reset && write) begin
+		if (reset || !write) begin
+			cache_valid <= 0;
+			cache_d <= 0;
+		end else begin
 			cache_valid <= 1;
-			cache_Rd <= Rd;
 			cache_d <= d;
-			cache_word <= write_word;
+			cache_Rd <= Rd;
 		end
 	end
 
 	// Handle un-aligned reads of the word-oriented block rams
 	// with matching the last written word
 	always @(*) begin
-		// default is to use the value from RAM
-		Ra = Ra_ram;
-		Rb = Rb_ram;
-
-/*
-		if (cache_valid) begin
-			// assume no word writes
-			if (a == cache_d) begin
-				$display("CACHE HIT A %d = %04x", a, cache_Rd);
-				Ra = cache_Rd;
-			end
-			if (b == cache_d) begin
-				$display("CACHE HIT B %d = %02x", b, cache_Rd);
-				Rb = cache_Rd;
-			end
-		end
-*/
-		if (cache_valid && a == cache_d)
+		if (write && a == d)
+			Ra = Rd;
+		else
+		if (cache_valid && cache_d == a)
 			Ra = cache_Rd;
-		if (cache_valid && b == cache_d)
+		else
+			Ra = Ra_ram;
+
+		if (write && b == d)
+			Rb = Rd;
+		else
+		if (cache_valid && cache_d == b)
 			Rb = cache_Rd;
+		else
+			Rb = Rb_ram;
 	end
 endmodule
 

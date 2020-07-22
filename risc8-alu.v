@@ -24,6 +24,7 @@
 `define OP_OR	4'hC
 `define OP_EOR	4'hD
 `define OP_SREG	4'hE // Update the SREG flags, uses carry input for set/clear
+`define OP_MUL  4'hF
 
 module risc8_alu(
 	input clk,
@@ -97,6 +98,14 @@ module risc8_alu(
 			SN = R15;
 			SZ = { Rh, R } == 0;
 		end
+/*
+		// need to infer a multiplier
+		`OP_MUL: begin
+			{ Rh, R } = Rd * Rr;
+			SC = R15;
+			SZ = { Rh, R } == 0;
+		end
+*/
 		`OP_NEG: begin
 			R = ~Rd;
 			SH = R3 | !Rd3;
@@ -174,5 +183,6 @@ module risc8_alu(
 	end
 
 endmodule
+
 
 `endif

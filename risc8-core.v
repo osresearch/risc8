@@ -126,7 +126,7 @@ module risc8_core(
 	wire [5:0] op_Rdi = { 1'b1, opcode[7:4] }; // 16-31
  	wire [5:0] op_Rp = { opcode[5:4], 3'b000 }; // 24-30
 	wire [7:0] op_K = { opcode[11:8], opcode[3:0] };
-	wire [5:0] op_Q = { opcode[13], opcode[15:14], opcode[2:0] };
+	wire [5:0] op_Q = { opcode[13], opcode[11:10], opcode[2:0] };
 
 	// IN and OUT instructions
 	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
@@ -564,7 +564,7 @@ module risc8_core(
 			// NOP. relax!
 		end
 		if (is_lds) begin
-			// LDS rd,i  / STS i,rd
+			// LDS rdi,i  / STS i,rdi
 			// No sreg update
 			// 2 cycles
 			// Load or store instructions
@@ -575,6 +575,7 @@ module risc8_core(
 				// for a STS the op_Rd will load the correct
 				// register into reg_Ra by the next cycle
 				force_PC = 1;
+				sel_Ra = op_Rdi;
 				next_cycle = 1;
 			end
 			2'b01: begin
@@ -592,7 +593,9 @@ module risc8_core(
 				end
 			end
 			2'b10: begin
-				// only LDS, store the data read from const
+				// only LDS, store the data read
+				// into Rdi
+				sel_Rd = op_Rdi;
 				alu_op = `OP_MOVR;
 				alu_store = 1;
 				alu_const = 1;

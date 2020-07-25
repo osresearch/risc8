@@ -1,6 +1,6 @@
 DEVICE-upduino ?= up5k
 FOOTPRINT-upduino ?= sg48
-PIN_SRC-upduino ?= ../up5k/upduino_v2.pcf
+PIN_SRC-upduino ?= upduino_v2.pcf
 
 DEVICE-icebreaker ?= up5k
 FOOTPRINT-icebreaker ?= sg48

@@ -26,6 +26,9 @@
 `define OP_SREG	4'hE // Update the SREG flags, uses carry input for set/clear
 `define OP_MUL  4'hF
 
+// If you don't use SREG half-carry flag, turn it off to save a few LC
+`define SREG_H
+
 module risc8_alu(
 	input clk,
 	input reset,
@@ -67,7 +70,9 @@ module risc8_alu(
 		case(op)
 		`OP_ADD: begin
 			R = Rd + Rr + opt_C;
+`ifdef SREG_H
 			SH = (Rd3 & Rr3) | (Rr3 & !R3) | (!R3 & Rd3);
+`endif
 			SS = SN^SV;
 			SV = (Rd7 & Rr7 & !R7) | (!Rd7 & !Rr7 & R7);
 			SN = R7;
@@ -76,7 +81,9 @@ module risc8_alu(
 		end
 		`OP_SUB: begin
 			R = Rd - Rr - opt_C;
+`ifdef SREG_H
 			SH = (!Rd3 & Rr3) | (Rr3 & R3) | (R3 & !Rd3);
+`endif
 			SS = SN^SV;
 			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
 			SN = R7;
@@ -108,7 +115,9 @@ module risc8_alu(
 */
 		`OP_NEG: begin
 			R = ~Rd;
+`ifdef SREG_H
 			SH = R3 | !Rd3;
+`endif
 			SV = R == 8'h80;
 			SN = R7;
 			SC = R != 0;

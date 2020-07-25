@@ -7,6 +7,46 @@
  * for the risc8 memory since there are either read or write cycles.
  * The SPRAMs can't be initialized in the bitstream, so the startup code
  * in the CPU is responsible for copying data to the RAM.
+ *
+ * They are fixed in 16-bit widths, so a wrapper is needed to make them
+ * byte addressable.
+ */
+
+module ice40up5k_spram(
+	input clk,
+	input cs,
+	input wen,
+	input [14:0] addr,
+	input [7:0] wdata,
+	output [7:0] rdata
+);
+	wire align = addr[0];
+	wire [15:0] rdata16;
+	reg byte;
+	assign rdata = byte ? rdata16[15:8] : rdata16[7:0];
+
+	always @(posedge clk)
+		byte <= align;
+
+	SB_SPRAM256KA spram (
+		.CLOCK(clk),
+		.CHIPSELECT(cs),
+		.WREN(wen),
+		.ADDRESS(addr[14:1]),
+		.DATAOUT(rdata16),
+		.DATAIN({wdata, wdata}),
+		.MASKWREN({align, align, !align, !align}),
+		.STANDBY(1'b0),
+		.SLEEP(1'b0),
+		.POWEROFF(1'b1)
+	);
+endmodule
+
+
+/*
+ * Bond together two SPRAM's to make one 64 KB data RAM for
+ * the risc8 CPU.  Since `addr` can change after a read, it is
+ * necessary to buffer the `bank` that the address needs.
  */
 module risc8_ram(
 	input clk,
@@ -15,41 +55,30 @@ module risc8_ram(
 	input [7:0] wdata,
 	output [7:0] rdata
 );
-	wire high = addr[0];
-	wire cs_0 = addr[15] == 0;
-	wire cs_1 = addr[15] == 1;
-	wire [15:0] rdata_0, rdata_1;
-	wire [ 7:0] rdata_0_byte = high ? rdata_0[15:8] : rdata_0[7:0];
-	wire [ 7:0] rdata_1_byte = high ? rdata_1[15:8] : rdata_1[7:0];
 
-	assign rdata = cs_1 ? rdata_1_byte : rdata_0_byte;
+	wire [7:0] rdata_00, rdata_01;
+	wire [7:0] rdata = bank ? rdata_01 : rdata_00;
+	reg bank;
 
-	wire [3:0] wen_mask = !wen ? 4'b0000 : { high, high, !high, !high };
+	always @(posedge clk)
+		bank <= addr[15];
 
-	SB_SPRAM256KA ram00 (
-		.ADDRESS(addr[14:1]),
-		.DATAIN({wdata, wdata}),
-		.MASKWREN(wen_mask),
-		.WREN(wen),
-		.CHIPSELECT(cs_0),
-		.CLOCK(clk),
-		.STANDBY(1'b0),
-		.SLEEP(1'b0),
-		.POWEROFF(1'b1),
-		.DATAOUT(rdata_0[15:0])
+	ice40up5k_spram spram00(
+		.clk(clk),
+		.cs(addr[15] == 1'b0),
+		.wen(wen),
+		.addr(addr[14:0]),
+		.rdata(rdata_00),
+		.wdata(wdata)
 	);
 
-	SB_SPRAM256KA ram01 (
-		.ADDRESS(addr[14:1]),
-		.DATAIN({wdata, wdata}),
-		.MASKWREN(wen_mask),
-		.WREN(wen),
-		.CHIPSELECT(cs_1),
-		.CLOCK(clk),
-		.STANDBY(1'b0),
-		.SLEEP(1'b0),
-		.POWEROFF(1'b1),
-		.DATAOUT(rdata_1[15:0])
+	ice40up5k_spram spram01(
+		.clk(clk),
+		.cs(addr[15] == 1'b1),
+		.wen(wen),
+		.addr(addr[14:0]),
+		.rdata(rdata_01),
+		.wdata(wdata)
 	);
 endmodule
 

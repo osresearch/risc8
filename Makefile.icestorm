@@ -6,7 +6,6 @@ DEVICE-icebreaker ?= up5k
 FOOTPRINT-icebreaker ?= sg48
 PIN_SRC-icebreaker ?= icebreaker.pcf
 
-
 DEVICE-tinyfpga := lp8k
 FOOTPRINT-tinyfpga := cm81
 PIN_SRC-tinyfpga := tinyfpga-bx.pcf
@@ -22,6 +21,7 @@ FOOTPRINT := $(FOOTPRINT-$(BOARD))
 PIN_SRC := $(PIN_SRC-$(BOARD))
 
 
+FPGA ?= FPGA_ICE40UP5K
 PNR ?= $(ICEPATH)nextpnr-ice40
 .SECONDARY:
 
@@ -38,6 +38,7 @@ PNR ?= $(ICEPATH)nextpnr-ice40
 %.json: %.v
 	$(ICEPATH)yosys \
 		-q \
+		-D$(FPGA) \
 		-p 'read_verilog $<' \
 		-p 'synth_ice40 -top top -json $@' \
 		-E .$(basename $@).d \

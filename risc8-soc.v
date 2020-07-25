@@ -3,6 +3,7 @@
 
 `default_nettype none
 `include "risc8-core.v"
+`include "risc8-ram.v"
 `include "uart.v"
 
 module risc8_soc(
@@ -15,13 +16,12 @@ module risc8_soc(
 	output serial_tx,
 	input serial_rx
 );
-	localparam RAMBITS = 12;
 	localparam CODEBITS = 10;
 
 	reg [7:0] port_b;
 	reg [7:0] ddr_b;
 
-	// code memory
+	// code memory (stored in normal block RAM)
 	reg [15:0] code[0:(1 << CODEBITS) - 1];
 	reg [15:0] cdata;
 	wire [15:0] pc;
@@ -33,31 +33,21 @@ module risc8_soc(
 		cdata <= code[pc[CODEBITS-1:0]];
 
 
-	// data memory
-
+	// data memory (stored in up5k SPRAM or in normal block RAM)
+	// byte addressable, single port, either read or write but not both
 	wire [15:0] addr;
-	reg [7:0] ram_data;
+	wire [7:0] ram_data;
 	wire [7:0] wdata;
 	wire wen;
 	wire ren;
-	reg [7:0] ram[0:(1 << RAMBITS)-1];
 
-	//initial $readmemh("zero.hex", ram);
-
-	// the RAM is clocked logic for reads and writes
-	// it shadows the IO memory space below 64 bytes
-	always @(posedge clk)
-	begin
-		ram_data <= ram[addr[RAMBITS-1:0]];
-		if (ren) begin
-			//$display("RD %04x => %02x", addr, ram[addr[RAMBITS-1:0]]);
-		end
-
-		if (wen) begin
-			$display("WR %04x <= %02x", addr, wdata);
-			ram[addr[RAMBITS-1:0]] <= wdata;
-		end
-	end
+	risc8_ram ram(
+		.clk(clk),
+		.wen(wen),
+		.addr(addr),
+		.wdata(wdata),
+		.rdata(ram_data)
+	);
 
 	// IO mapped peripherals are at the bottom 64-bytes of RAM
 	reg io_sel;

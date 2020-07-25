@@ -1,12 +1,14 @@
 `default_nettype none
-`define RISC8_PROGRAM "blink.hex"
+`define RISC8_PROGRAM "hello.hex"
 `include "risc8-soc.v"
 
 module top(
 	output led_r,
 	output led_g,
 	output led_b,
-	output spi_cs
+	output spi_cs,
+	input serial_rxd,
+	output serial_txd
 );
 	assign spi_cs = 1;
 
@@ -37,6 +39,9 @@ module top(
 		.port_b(port_b),
 		.pin_b(pin_b),
 		.ddr_b(ddr_b),
+
+		.serial_tx(serial_txd),
+		.serial_rx(serial_rxd)
 	);
 
 endmodule

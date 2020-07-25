@@ -130,6 +130,8 @@ module risc8_core(
 
 	// IN and OUT instructions
 	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
+	wire [2:0] op_bit_select = opcode[2:0];
+	wire op_bit_set = opcode[9];
 
 	// LD vs ST is in the 9th bit
 	wire op_is_store = opcode[9];
@@ -244,7 +246,7 @@ module risc8_core(
 	reg is_ldi, is_lpm, is_push, is_pop, is_com, is_neg, is_swap;
 	reg is_inc, is_asr, is_lsr, is_ror, is_ijmp, is_dec, is_jmp, is_call;
 	reg is_adiw_or_sbiw, is_ld_yz_plus_q, is_ret, is_clx_or_sex;
-	reg is_mulu;
+	reg is_mulu, is_sbis_or_sbic;
 
 	always @(*) begin
 		is_nop = 0; is_movw = 0; is_cpc = 0; is_sbc = 0; is_add = 0;
@@ -257,7 +259,7 @@ module risc8_core(
 		is_inc = 0; is_asr = 0; is_lsr = 0; is_ror = 0; is_ijmp = 0;
 		is_dec = 0; is_jmp = 0; is_jmp = 0; is_call = 0; is_ret = 0;
 		is_adiw_or_sbiw = 0; is_ld_yz_plus_q = 0; is_clx_or_sex = 0;
-		is_mulu = 0;
+		is_mulu = 0; is_sbis_or_sbic = 0;
 
 		/*
 		 * Match instructions on every bit except for the
@@ -318,6 +320,7 @@ module risc8_core(
 		11'b1001_010_1111: is_call = 1;
 		11'b1001_011_????: is_adiw_or_sbiw = 1;
 		//12'b1001_11??_????: is_mulu = 1; // need to infer multiply
+		11'b1001_10?_????: is_sbis_or_sbic = 1;
 		11'b1011_0??_????: is_in = 1;
 		11'b1011_1??_????: is_out = 1;
 		11'b1100_???_????: is_rjmp = 1;
@@ -794,39 +797,33 @@ module risc8_core(
 */
 		if (is_push) begin
 			// PUSH Rd
-			case(cycle)
-			2'b00: begin
+			if(cycle[0] == 0) begin
 				// just delay until we have the Rd available
 				// in register A
 				next_cycle = 1;
-			end
-			2'b01: begin
+			end else begin
 				// enqueue the write
 				next_wen = 1;
 				next_addr = reg_SP;
 				next_SP = reg_SP - 1;
 				next_wdata = reg_Ra[7:0];
 			end
-			endcase
 		end
 
 		if (is_pop) begin
 			// POP Rd
-			case(cycle)
-			2'b00: begin
+			if(cycle[0] == 0) begin
 				// start the read
 				next_ren = 1;
 				next_addr = reg_SP + 1;
 				next_SP = reg_SP + 1;
 				next_cycle = 1;
-			end
-			2'b01: begin
+			end else begin
 				alu_op = `OP_MOVR;
 				alu_store = 1;
 				alu_const = 1;
 				alu_const_value = data_read;
 			end
-			endcase
 		end
 
 		if (is_clx_or_sex) begin
@@ -864,9 +861,9 @@ module risc8_core(
 		// CPSE Rd,Rr (no sreg updates)
 		if(is_cpse) begin
 			// wait for Rd and Rr to be available
-			if (cycle == 0) begin
+			if (cycle[0] == 0)
 				next_cycle = 1;
-			end else
+			else
 			if (reg_Ra[7:0] == reg_Rb)
 				next_skip = 1;
 		end
@@ -875,10 +872,10 @@ module risc8_core(
 		if (is_sbrc_or_sbrs) begin
 			// 16'b1111_110?_????_0???, // SBRC
 			// 16'b1111_111?_????_0???: // SBRS
-			if(cycle == 0)
+			if(cycle[0] == 0)
 				next_cycle = 1;
 			else
-			if (reg_Ra[opcode[2:0]] == opcode[9])
+			if (reg_Ra[op_bit_select] == op_bit_set)
 				next_skip = 1;
 		end
 
@@ -889,7 +886,7 @@ module risc8_core(
 		if (is_brbc_or_brbs) begin
 			// 16'b1111_00??_????_????, // BRBS
 			// 16'b1111_01??_????_????: // BRBC
-			if (next_sreg[opcode[2:0]] != opcode[9])
+			if (next_sreg[op_bit_select] != op_bit_set)
 				next_PC = reg_PC + simm7 + 1;
 		end
 
@@ -954,15 +951,11 @@ module risc8_core(
 			// IJMP Z - Indirect jump/call to Z or EIND:Z
 			// 16'b1001_010?_000?_1001:
 			// 2 cycles
-			case(cycle)
-			2'b00: begin
+			if(cycle[0] == 0) begin
 				next_cycle = 1;
 				sel_Ra = BASE_Z;
-			end
-			2'b01: begin
+			end else
 				next_PC = reg_Ra;
-			end
-			endcase
 		end
 
 		if (is_rjmp) begin
@@ -1008,12 +1001,10 @@ module risc8_core(
 		// the register now takes a cycle
 		if (is_out) begin
 			// 16'b1011_1???_????_????: begin
-			case(cycle)
-			2'b00: begin
+			if(cycle[0] == 0) begin
 				// wait for Rd to show up in Ra
 				next_cycle = 1;
-			end
-			2'b01: begin
+			end else begin
 				next_wen = 1;
 				next_wdata = reg_Ra;
 				next_addr = io_addr + 8'h20;
@@ -1028,7 +1019,6 @@ module risc8_core(
 				end
 				endcase
 			end
-			endcase
 		end
 
 		// IN from IO space (no sreg update, should be 1 cycle)
@@ -1036,13 +1026,11 @@ module risc8_core(
 		// the external SOC will handle it.
 		if (is_in) begin
 			// 16'b1011_0???_????_????: begin
-			case(cycle)
-			2'b00: begin
+			if(cycle[0] == 0) begin
 				next_addr = io_addr + 8'h20;
 				next_ren = 1;
 				next_cycle = 1;
-			end
-			2'b01: begin
+			end else begin
 				alu_op = `OP_MOVR;
 				alu_store = 1;
 				alu_const = 1;
@@ -1053,7 +1041,17 @@ module risc8_core(
 				default: alu_const_value = data_read; // from the SOC
 				endcase
 			end
-			endcase
+		end
+
+		// Skip if bit in IO space is set or clear.
+		if (is_sbis_or_sbic) begin
+			if (cycle[0] == 0) begin
+				next_addr = opcode[7:3] + 8'h20;
+				next_ren = 1;
+				next_cycle = 1;
+			end else
+			if (data_read[op_bit_select] == op_bit_set)
+				next_skip = 1;
 		end
 	end // skip
 	end

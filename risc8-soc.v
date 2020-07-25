@@ -3,6 +3,7 @@
 
 `default_nettype none
 `include "risc8-core.v"
+`include "uart.v"
 
 module risc8_soc(
 	input clk,
@@ -10,7 +11,9 @@ module risc8_soc(
 
 	output [7:0] port_b,
 	input [7:0] pin_b,
-	output [7:0] ddr_b
+	output [7:0] ddr_b,
+	output serial_tx,
+	input serial_rx
 );
 	localparam RAMBITS = 12;
 	localparam CODEBITS = 10;
@@ -61,11 +64,33 @@ module risc8_soc(
 	wire [6:0] io_addr = addr[6:0];
 	reg  [7:0] io_data;
 
+	// timer running at the clock speed
 	reg [7:0] tcnt1 = 8'h55;
+
+	// uart on the serial pins
+	reg [7:0] uart_baud_div = 8'h05; // 6 Mhz / 52 == 115200
+	reg [7:0] uart_tx_data;
+	reg uart_tx_strobe;
+	wire uart_tx_ready;
+
+	wire [7:0] uart_status_reg = { 7'b0000000, uart_tx_ready };
+
+	uart uart(
+		.clk(clk),
+		.reset(reset),
+		.baud_div(uart_baud_div),
+		.tx_strobe(uart_tx_strobe),
+		.tx_data(uart_tx_data),
+		.tx_ready(uart_tx_ready),
+		.tx_out(serial_tx)
+		//.rx_strobe(uart_rx_
+		//.rx_data(usidr
+	);
 
 	// io writes are on the rising edge of the clock
 	always @(posedge clk) begin
 		tcnt1 <= tcnt1 + 1;
+		uart_tx_strobe <= 0;
 		io_sel <= 0;
 
  		if ((wen | ren) && (addr < 16'h0060)) begin
@@ -73,6 +98,8 @@ module risc8_soc(
 			if (wen) begin
 				$display("IO %02x <= %02x", io_addr, wdata);
 				case(io_addr)
+				7'h2F: { uart_tx_data, uart_tx_strobe } <= { wdata, 1'b1 };
+				7'h2D: uart_baud_div <= wdata;
 				7'h37: ddr_b <= wdata;
 				7'h38: port_b <= wdata;
 
@@ -83,6 +110,8 @@ module risc8_soc(
 			if (ren) begin
 				$display("IO %02x", io_addr);
 				case(io_addr)
+				7'h2E: io_data <= uart_status_reg;
+				7'h2D: io_data <= uart_baud_div;
 				7'h36: io_data <= pin_b;
 				7'h37: io_data <= ddr_b;
 				7'h38: io_data <= port_b;

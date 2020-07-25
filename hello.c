@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <stdint.h>
+#include <stdio.h>
 
 void uart_putc(char c)
 {
@@ -32,17 +33,18 @@ static char hexdigit(uint8_t x)
 
 int main(void)
 {
-	uint16_t cycle = 0;
+	uint16_t cycle = 1 << 12;
 
 	while(1)
 	{
+		pwm(cycle >> 4, cycle >> 12);
+
 		uart_putc(hexdigit(cycle >> 12));
 		uart_putc(hexdigit(cycle >>  8));
 		uart_putc(hexdigit(cycle >>  4));
 		uart_putc(hexdigit(cycle >>  0));
-		pwm(cycle >> 4, cycle >> 12);
-
 		uart_puts(" Hello world\r\n");
+
 		cycle++;
 	}
 }

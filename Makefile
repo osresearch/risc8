@@ -1,12 +1,14 @@
 
-all: top.bin
+all:
 
 TEST-y += test-risc8
+TEST-y += test-reg
+
+ice40-risc8.bit: program.hex
 
 include Makefile.icestorm
 
 CROSS ?= avr-
-#CROSS ?= /home/hudson/bin/arduino-1.8.10/hardware/tools/avr/bin/avr-
 
 CFLAGS ?= \
 	-O3 \
@@ -14,15 +16,15 @@ CFLAGS ?= \
 	-mmcu=attiny85 \
 
 NO=\
+	-Wl,-T,sections.lds \
+	-ffreestanding \
+	-nostdinc \
+	-nostdlib \
 
 %.bin: %.elf
 	$(CROSS)objcopy -Obinary $< $@
 %.elf: %.o
 	$(CROSS)gcc $(CFLAGS) -o $@ $^ \
-	-Wl,-T,sections.lds \
-	-ffreestanding \
-	-nostdinc \
-	-nostdlib \
 
 %.o: %.c
 	$(CROSS)gcc $(CFLAGS) -c -o $@ $^

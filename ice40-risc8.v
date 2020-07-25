@@ -1,5 +1,4 @@
 `default_nettype none
-`define RISC8_PROGRAM "hello.hex"
 `include "risc8-soc.v"
 
 module top(

@@ -124,7 +124,7 @@ module risc8_core(
 	wire [5:0] op_Rr = { opcode[9], opcode[3:0] }; // 0-31
 	wire [5:0] op_Rd = opcode[8:4]; // 0-31
 	wire [5:0] op_Rdi = { 1'b1, opcode[7:4] }; // 16-31
- 	wire [5:0] op_Rp = { opcode[5:4], 3'b000 }; // 24-30
+	wire [5:0] op_Rp = { 2'b11, opcode[5:4], 1'b0 }; // 24-30
 	wire [7:0] op_K = { opcode[11:8], opcode[3:0] };
 	wire [5:0] op_Q = { opcode[13], opcode[11:10], opcode[2:0] };
 

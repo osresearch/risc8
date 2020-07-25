@@ -400,15 +400,16 @@ module risc8_core(
 		end
 		if (is_add) begin
 			// ADD Rd,Rr / LSL Rd when Rd=Rr
-			alu_store = 1;
 			alu_op = `OP_ADD;
+			alu_store = 1;
 		end
 		if (is_adc) begin
 			// ADC Rd,Rr / ROL Rd when Rd=Rr
+			alu_op = `OP_ADD;
 			alu_store = 1;
 			alu_carry = 1;
-			alu_op = `OP_ADD;
 		end
+`ifdef HAVE_MULU
 		if (is_mulu) begin
 			// MULU Rd, Rr => R1/R0
 			alu_op = `OP_MUL;
@@ -416,6 +417,7 @@ module risc8_core(
 			alu_word = 1;
 			sel_Rd = 0;
 		end
+`endif
 		if (is_and) begin
 			// AND Rd,Rr
 			alu_store = 1;
@@ -436,32 +438,48 @@ module risc8_core(
 			alu_store = 1;
 			alu_op = `OP_MOVR;
 		end
-		if (is_cpi) begin
-			// CPI Rd,K (only updates status register, so no dest)
+`ifdef merged_ops
+		if (is_subi || is_sbci || is_cpi) begin
+			// SUBI Rd, K or
+			// SBCI Rd, K or
+			// CPI Rd,K
 			alu_op = `OP_SUB;
 			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_store = !is_cpi; // CPI doesn't store
+			alu_carry = is_sbci; // only SBCI uses carry
+			alu_const = 1;
+			alu_const_value = op_K;
+		end
+`else
+		if (is_subi) begin
+			// SUBI Rd, K or
+			// SBCI Rd, K or
+			// CPI Rd,K
+			alu_op = `OP_SUB;
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_store = !is_cpi; // CPI doesn't store
+			alu_carry = is_sbci; // only SBCI uses carry
 			alu_const = 1;
 			alu_const_value = op_K;
 		end
 		if (is_sbci) begin
-			// SBCI Rd, K
 			alu_op = `OP_SUB;
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_store = 1;
 			alu_carry = 1;
-			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
-			alu_const_value = op_K;
 			alu_const = 1;
-			alu_store = 1;
+			alu_const_value = op_K;
 		end
-		if (is_subi) begin
-			// SUBI Rd, K
+		if (is_cpi) begin
 			alu_op = `OP_SUB;
 			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
-			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = op_K;
 		end
+`endif
 		if (is_ori) begin
 			// ORI Rd,K or SBR Rd, K
 			alu_op = `OP_OR;
@@ -482,16 +500,16 @@ module risc8_core(
 		end
 		if (is_com) begin
 			// COM Rd
-			alu_store = 1;
 			alu_op = `OP_EOR;
+			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 8'hFF;
 		end
 		if (is_neg) begin
 			// NEG Rd
 			// 16'b1001_010?_????_0001: begin
-			alu_store = 1;
 			alu_op = `OP_NEG;
+			alu_store = 1;
 		end
 		if (is_swap) begin
 			// SWAP Rd, no sreg updates
@@ -502,32 +520,32 @@ module risc8_core(
 		if (is_inc) begin
 			// INC Rd
 			//16'b1001_010_?????_0011: begin
-			alu_store = 1;
 			alu_op = `OP_ADD;
+			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 1;
 		end
 		if (is_asr) begin
 			// ASR Rd
-			alu_store = 1;
 			alu_op = `OP_ASR;
+			alu_store = 1;
 		end
 		if (is_lsr) begin
 			// LSR Rd
-			alu_store = 1;
 			alu_op = `OP_LSR;
+			alu_store = 1;
 		end
 		if (is_ror) begin
 			// ROR Rd
 			// 16'b1001_010?_????_0111: begin
-			alu_store = 1;
 			alu_op = `OP_ROR;
+			alu_store = 1;
 		end
 		if (is_dec) begin
 			// DEC Rd
 			// 16'b1001_010?_????_1010: begin
-			alu_store = 1;
 			alu_op = `OP_SUB;
+			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 1;
 		end
@@ -569,13 +587,15 @@ module risc8_core(
 			// 2 cycles
 			// Load or store instructions
 			// followed by 16-bit immediate SRAM address
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+
 			case(cycle)
 			2'b00: begin
 				// wait for the next read to get the address
 				// for a STS the op_Rd will load the correct
 				// register into reg_Ra by the next cycle
 				force_PC = 1;
-				sel_Ra = op_Rdi;
 				next_cycle = 1;
 			end
 			2'b01: begin
@@ -595,7 +615,6 @@ module risc8_core(
 			2'b10: begin
 				// only LDS, store the data read
 				// into Rdi
-				sel_Rd = op_Rdi;
 				alu_op = `OP_MOVR;
 				alu_store = 1;
 				alu_const = 1;
@@ -660,8 +679,8 @@ module risc8_core(
 				// extra cycle only for LD
 				// the memory has loaded the value,
 				// so use the ALU to store into Rd
-				sel_Rd = op_Rd;
 				alu_op = `OP_MOVR;
+				sel_Rd = op_Rd;
 				alu_store = 1;
 				alu_const = 1;
 				alu_const_value = data_read;
@@ -672,14 +691,15 @@ module risc8_core(
 			// ST / LD Rd, Y/Z+Q (no status update)
 			// Z+Q: 16'b10?0_????_????_0???:
 			// Y+Q: 16'b10?0_????_????_1???:
+			sel_Ra = opcode[3] ? BASE_Y : BASE_Z;
+			sel_Rb = op_Rd;
+			sel_Rd = op_Rd;
+
 			case(cycle)
 			2'b00: begin
 				// wait for the full Y or Z register,
 				// with the immediate value added
 				// to fetch as well as the contents of Rd
-				sel_Ra = opcode[3] ? BASE_Y : BASE_Z;
-				sel_Rb = op_Rd;
-
 				alu_op = `OP_ADW;
 				alu_const = 1;
 				alu_const_value = op_Q;
@@ -704,7 +724,6 @@ module risc8_core(
 				// extra cycle only for LD
 				// the memory has loaded the value,
 				// so use the ALU to store into Rd
-				sel_Rd = op_Rd;
 				alu_op = `OP_MOVR;
 				alu_store = 1;
 				alu_const = 1;
@@ -714,17 +733,17 @@ module risc8_core(
 		end
 		if (is_lpm) begin
 			// LPM/ELPM Rd, Z / Z+
+			sel_Ra = BASE_Z;
+			sel_Rd = sel_Ra;
+
 			case(cycle)
 			2'b00: begin
 				// fetch the Z register
-				sel_Ra = BASE_Z;
 				next_cycle = 1;
 			end
 			2'b01: begin
 				// if this is Z+ mode, add one to Z
 				alu_op = `OP_ADW;
-				sel_Ra = BASE_Z;
-				sel_Rd = sel_Ra;
 				alu_store = 1;
 				alu_word = 1;
 				alu_const = 1;
@@ -739,12 +758,14 @@ module risc8_core(
 				next_cycle = 2;
 			end
 			2'b10: begin
-				// store the correct byte of read data,
+				// store the correct byte of read data into Rd
 				// based on the bottom bit of the original Z
-				alu_store = 1;
 				alu_op = `OP_MOVR;
+				alu_store = 1;
 				alu_const = 1;
 				alu_const_value = reg_Ra[0] ? cdata[15:8] : cdata[7:0];
+				sel_Rd = op_Rd;
+
 				// and return to the program flow by
 				// reading the temp reg.
 				next_PC = temp;
@@ -862,10 +883,13 @@ module risc8_core(
 		end
 
 		// BRBS/BRBC - Branch if bit in SREG is set/clear
+		// this happens while the ALU is still computing the
+		// previous instruction, so use the next SREG value,
+		// not the current register.
 		if (is_brbc_or_brbs) begin
 			// 16'b1111_00??_????_????, // BRBS
 			// 16'b1111_01??_????_????: // BRBC
-			if (sreg[opcode[2:0]] != opcode[9])
+			if (next_sreg[opcode[2:0]] != opcode[9])
 				next_PC = reg_PC + simm7 + 1;
 		end
 

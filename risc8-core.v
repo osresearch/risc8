@@ -769,10 +769,15 @@ module risc8_core(
 				alu_const_value = reg_Ra[0] ? cdata[15:8] : cdata[7:0];
 				sel_Rd = op_Rd;
 
-				// and return to the program flow by
-				// reading the temp reg.
-				next_PC = temp;
+				// restore the PC, and do one more cycle
+				// so that the next_PC will prefetch the
+				// correct next instruction
 				force_PC = 1;
+				next_PC = temp;
+				next_cycle = 3;
+			end
+			2'b11: begin
+				// nothing to do, just allow prefetch to work
 			end
 			endcase
 		end

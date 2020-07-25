@@ -6,6 +6,10 @@
 `include "risc8-ram.v"
 `include "uart.v"
 
+`ifndef RISC8_PROGRAM
+`define RISC8_PROGRAM "program.syn.hex"
+`endif
+
 module risc8_soc(
 	input clk,
 	input reset,
@@ -16,7 +20,7 @@ module risc8_soc(
 	output serial_tx,
 	input serial_rx
 );
-	localparam CODEBITS = 10;
+	localparam CODEBITS = 12;
 
 	reg [7:0] port_b;
 	reg [7:0] ddr_b;

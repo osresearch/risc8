@@ -1,4 +1,5 @@
 #include <avr/io.h>
+#include <avr/pgmspace.h>
 #include <stdint.h>
 
 void uart_putc(char c)
@@ -23,19 +24,23 @@ static void __attribute__((__noinline__)) pwm(uint8_t b, uint8_t led)
 		PORTB = 0;
 }
 
+static char hexdigit(uint8_t x)
+{
+	static const char PROGMEM hexdigit[16] = "0123456789abcdef";
+	return pgm_read_byte_near(hexdigit + (x & 0xF));
+}
 
 int main(void)
 {
 	uint16_t cycle = 0;
-	static const char hexdigit[16] = "0123456789abcdef";
 
 	while(1)
 	{
-		uart_putc(hexdigit[(cycle >> 12) & 0xF]);
-		uart_putc(hexdigit[(cycle >>  8) & 0xF]);
-		uart_putc(hexdigit[(cycle >>  4) & 0xF]);
-		uart_putc(hexdigit[(cycle >>  0) & 0xF]);
-		pwm(cycle >> 4, 1);
+		uart_putc(hexdigit(cycle >> 12));
+		uart_putc(hexdigit(cycle >>  8));
+		uart_putc(hexdigit(cycle >>  4));
+		uart_putc(hexdigit(cycle >>  0));
+		pwm(cycle >> 4, cycle >> 12);
 
 		uart_puts(" Hello world\r\n");
 		cycle++;

@@ -1,10 +1,14 @@
 
-all:
+all: ice40-risc8.bit
 
 TEST-y += test-risc8
 TEST-y += test-reg
 
 ice40-risc8.bit: program.hex
+
+PROGRAM ?= hello
+program.hex: $(PROGRAM).hex
+	cp $< $@
 
 include Makefile.icestorm
 

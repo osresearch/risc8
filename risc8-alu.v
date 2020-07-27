@@ -15,16 +15,16 @@
 `define OP_SUB	4'h3
 `define OP_ADW	4'h4
 `define OP_SBW	4'h5 // must be OP_ADW | 1
-`define OP_LSR	4'h6
-`define OP_NEG	4'h7
+`define OP_NEG	4'h6
+`define OP_SWAP	4'h7
 `define OP_ASR	4'h8
 `define OP_ROR	4'h9 // must be OP_ASR | 1
-`define OP_SWAP	4'hA
+`define OP_LSR	4'hA
 `define OP_AND	4'hB
-`define OP_OR	4'hC
-`define OP_EOR	4'hD
+`define OP_EOR	4'hC
+`define OP_OR	4'hD
 `define OP_SREG	4'hE // Update the SREG flags, uses carry input for set/clear
-`define OP_MUL  4'hF
+`define OP_MUL  4'hF // optional
 
 // If you don't use SREG half-carry flag, turn it off to save a few LC
 `define SREG_H
@@ -71,6 +71,18 @@ module risc8_alu(
 		sreg_default_snz = 1;
 
 		case(op)
+		`OP_MOVE: begin
+			// Default will copy {R,Rh} <= Rd
+			// Do not modify any SREG
+			sreg_default_snz = 0;
+		end
+		`OP_MOVR: begin
+			// Copy the Rb input byte to the output
+			// Do not modify any SREG
+			Rh = 0;
+			R = Rr;
+			sreg_default_snz = 0;
+		end
 		`OP_ADD: begin
 			R = Rd + Rr + opt_C;
 `ifdef SREG_H
@@ -103,14 +115,6 @@ module risc8_alu(
 			SZ = { Rh, R } == 0;
 			sreg_default_snz = 0;
 		end
-/*
-		// need to infer a multiplier
-		`OP_MUL: begin
-			{ Rh, R } = Rd * Rr;
-			SC = R15;
-			SZ = { Rh, R } == 0;
-		end
-*/
 		`OP_NEG: begin
 			R = ~Rd;
 `ifdef SREG_H
@@ -161,18 +165,14 @@ module risc8_alu(
 			endcase
 			sreg_default_snz = 0;
 		end
-		`OP_MOVE: begin
-			// Default will copy {R,Rh} <= Rd
-			// Do not modify any SREG
-			sreg_default_snz = 0;
+`ifdef CONFIG_MULU
+		// need to infer a multiplier
+		`OP_MUL: begin
+			{ Rh, R } = Rd * Rr;
+			SC = R15;
+			SZ = { Rh, R } == 0;
 		end
-		`OP_MOVR: begin
-			// Copy the Rb input byte to the output
-			// Do not modify any SREG
-			Rh = 0;
-			R = Rr;
-			sreg_default_snz = 0;
-		end
+`endif
 		endcase
 
 		// many operations reuse this calculation

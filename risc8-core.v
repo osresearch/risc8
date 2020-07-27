@@ -332,6 +332,8 @@ module risc8_core(
 	end
 
 	/*******************************/
+	reg do_sp_push;
+	reg do_sp_pop;
 
 	always @(*) begin
 
@@ -352,6 +354,8 @@ module risc8_core(
 		next_temp = temp;
 		force_PC = 0;
 		next_SP = reg_SP;
+		do_sp_push = 0;
+		do_sp_pop = 0;
 
 
 		// Default is to not store, but if commiting to the register
@@ -808,10 +812,8 @@ module risc8_core(
 				next_cycle = 1;
 			end else begin
 				// enqueue the write
-				next_wen = 1;
-				next_addr = reg_SP;
-				next_SP = reg_SP - 1;
 				next_wdata = reg_Ra[7:0];
+				do_sp_push = 1;
 			end
 		end
 
@@ -819,10 +821,7 @@ module risc8_core(
 			// POP Rd
 			if(cycle[0] == 0) begin
 				// start the read
-				next_ren = 1;
-				next_addr = reg_SP + 1;
-				next_SP = reg_SP + 1;
-				next_cycle = 1;
+				do_sp_pop = 1;
 			end else begin
 				alu_op = `OP_MOVR;
 				alu_store = 1;
@@ -845,17 +844,13 @@ module risc8_core(
 			// RET
 			case(cycle)
 			2'b00: begin
+				do_sp_pop = 1;
 				next_cycle = 1;
-				next_SP = reg_SP + 1;
-				next_addr = next_SP;
-				next_ren = 1;
 			end
 			2'b01: begin
-				next_cycle = cycle + 1;
+				do_sp_pop = 1;
 				next_temp[7:0] = data_read;
-				next_SP = reg_SP + 1;
-				next_addr = next_SP;
-				next_ren = 1;
+				next_cycle = cycle + 1;
 			end
 			2'b10: begin
 				next_PC = { temp[7:0], data_read };
@@ -929,19 +924,15 @@ module risc8_core(
 			2'b01: begin
 				// cdata now has the destination address
 				// start pushing next_PC
+				do_sp_push = 1;
 				next_temp = cdata;
-				next_addr = reg_SP;
-				next_SP = reg_SP + 1;
 				next_wdata = next_PC[7:0];
-				next_wen = 1;
 				next_cycle = 2;
 			end
 			2'b10: begin
 				// write the second half of the return address
-				next_addr = reg_SP;
-				next_SP = reg_SP + 1;
 				next_wdata = next_PC[15:8];
-				next_wen = 1;
+				do_sp_push = 1;
 				next_cycle = 3;
 			end
 			2'b11: begin
@@ -977,17 +968,13 @@ module risc8_core(
 			case(cycle)
 			2'b00: begin
 				// push the first half of the PC
-				next_wen = 1;
-				next_addr = reg_SP;
-				next_SP = reg_SP - 1;
+				do_sp_push = 1;
 				next_wdata = next_PC[7:0]; // pc + 1
 				next_cycle = 1;
 			end
 			2'b01: begin
 				// push the second half
-				next_wen = 1;
-				next_addr = reg_SP;
-				next_SP = reg_SP - 1;
+				do_sp_push = 1;
 				next_wdata = next_PC[15:8]; // pc + 1
 				next_cycle = 2;
 			end
@@ -1057,6 +1044,22 @@ module risc8_core(
 			end else
 			if (data_read[op_bit_select] == op_bit_set)
 				next_skip = 1;
+		end
+
+		// post-decrement the stack pointer
+		// and start a write of next_wdata to the stack
+		if (do_sp_push) begin
+			next_wen = 1;
+			next_addr = reg_SP;
+			next_SP = reg_SP - 1;
+		end
+
+		// pre-increment the stack pointer
+		// and start a read of the stack, will be in read_data
+		if (do_sp_pop) begin
+			next_ren = 1;
+			next_addr = reg_SP + 1;
+			next_SP = reg_SP + 1;
 		end
 	end // skip
 	end

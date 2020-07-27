@@ -1,6 +1,8 @@
 `default_nettype none
 
-`define RISC8_PROGRAM "test1.hex"
+`ifndef RISC8_PROGRAM
+`define RISC8_PROGRAM "tests/test0.hex"
+`endif
 
 `include "risc8-soc.v"
 

@@ -20,7 +20,7 @@ module risc8_uart(
 	output tx_out
 );
 	parameter BASE = 7'h2D;
-	reg [7:0] uart_baud_div = 8'h05; // 6 Mhz / 6 == 1 megabaud
+	reg [7:0] uart_baud_div = 12 - 1; // 12 Mhz / 12 == 1 megabaud
 	reg [7:0] uart_tx_data;
 	reg uart_tx_strobe;
 	wire uart_tx_ready;
@@ -115,7 +115,10 @@ module risc8_gpio(
 		if (wen) case(addr)
 		//BASE + 0: pin <= wdata;
 		BASE + 1: ddr <= wdata;
-		BASE + 2: port <= wdata;
+		BASE + 2: begin
+			$display("PORT %02x", wdata);
+			port <= wdata;
+		end
 		endcase
 
 		if (ren) case(addr)

@@ -18,6 +18,10 @@
  */
 `ifndef _risc8_core_v_
 `define _risc8_core_v_
+
+`define CONFIG_LDS
+//`define CONFIG_MULU
+
 `include "risc8-alu.v"
 `include "risc8-regs.v"
 
@@ -75,23 +79,23 @@ module risc8_core(
 	reg [15:0] reg_SP;
 	reg [15:0] next_SP;
 	reg [7:0] sreg;
-	reg SI, ST, SH, SS, SV, SN, SZ, SC;
 
 	// the PC output is almost always the actual PC,
 	// although sometimes it is the address for a LPM
-	assign pc = next_PC; // lpm_active ? addr : reg_PC;
+	// or a LDS instruction that uses the next cdata
+	assign pc = next_PC;
 	reg [15:0] next_PC;
 	reg force_PC;
 
 	// Some instructions require an extra cycle;
 	// they will set cycle and re-use the previous opcode
-	reg [1:0] cycle = 0;
+	reg [1:0] cycle;
 	reg [1:0] next_cycle;
 
 	// Some instruction can cause the next instruction to be skipped,
 	// which might be multiple words; this still executes the instruction,
 	// but doesn't write any results
-	reg skip = 0;
+	reg skip;
 	reg next_skip;
 	reg [15:0] prev_opcode;
 	wire [15:0] opcode = cycle == 0 ? cdata : prev_opcode;
@@ -338,10 +342,10 @@ module risc8_core(
 	reg do_alu_ldst;
 	reg do_reg_ldst;
 	reg do_data_load;
+	reg do_use_rdi;
 
 	always @(*) begin
-
-		// start pre-fetching the next PC
+		// start pre-fetching the next PC if we are not in reset
 		if (reset)
 			next_PC = 0;
 		else
@@ -366,7 +370,7 @@ module risc8_core(
 		do_alu_ldst = 0;
 		do_reg_ldst = 0;
 		do_data_load = 0;
-
+		do_use_rdi = 0;
 
 		// Default is to not store, but if commiting to the register
 		// file is selected, then to store to the Rd value
@@ -376,7 +380,8 @@ module risc8_core(
 		alu_const_value = 0;
 		alu_carry = 0;
 
-		// default is to select the Rd and Rr from the opcode, storing into Rd
+		// default is to select the Rd and Rr from the opcode,
+		// storing into Rd.  Some instructions modify these
 		alu_op = `OP_MOVE;
 		sel_Ra = op_Rd;
 		sel_Rb = op_Rr;
@@ -426,7 +431,7 @@ module risc8_core(
 			alu_store = 1;
 			alu_carry = 1;
 		end
-`ifdef HAVE_MULU
+`ifdef CONFIG_MULU
 		if (is_mulu) begin
 			// MULU Rd, Rr => R1/R0
 			alu_op = `OP_MUL;
@@ -455,6 +460,7 @@ module risc8_core(
 			alu_store = 1;
 			alu_op = `OP_MOVR;
 		end
+//`define merged_ops
 `ifdef merged_ops
 		if (is_subi || is_sbci || is_cpi) begin
 			// SUBI Rd, K or
@@ -470,50 +476,35 @@ module risc8_core(
 		end
 `else
 		if (is_subi) begin
-			// SUBI Rd, K or
-			// SBCI Rd, K or
-			// CPI Rd,K
+			// SUBI Rdi, K
 			alu_op = `OP_SUB;
-			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
-			alu_store = !is_cpi; // CPI doesn't store
-			alu_carry = is_sbci; // only SBCI uses carry
-			alu_const = 1;
-			alu_const_value = op_K;
+			do_use_rdi = 1;
+			alu_store = 1;
 		end
 		if (is_sbci) begin
+			// SBCI Rdi, K
 			alu_op = `OP_SUB;
-			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
 			alu_store = 1;
 			alu_carry = 1;
-			alu_const = 1;
-			alu_const_value = op_K;
+			do_use_rdi = 1;
 		end
 		if (is_cpi) begin
+			// CPI Rdi, K
 			alu_op = `OP_SUB;
-			sel_Ra = op_Rdi;
-			alu_const = 1;
-			alu_const_value = op_K;
+			do_use_rdi = 1;
 		end
 `endif
 		if (is_ori) begin
 			// ORI Rd,K or SBR Rd, K
 			alu_op = `OP_OR;
-			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
-			alu_const_value = op_K;
-			alu_const = 1;
 			alu_store = 1;
+			do_use_rdi = 1;
 		end
 		if (is_andi) begin
 			// ANDI Rd,K or CBR Rd, K
 			alu_op = `OP_AND;
-			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
-			alu_const_value = op_K;
-			alu_const = 1;
 			alu_store = 1;
+			do_use_rdi = 1;
 		end
 		if (is_com) begin
 			// COM Rd
@@ -589,15 +580,15 @@ module risc8_core(
 		end
 		if (is_ldi) begin
 			// LDI Rdi, K (no sreg updates)
-			sel_Rd = op_Rdi;
 			alu_op = `OP_MOVR;
 			alu_store = 1;
-			alu_const = 1;
-			alu_const_value = op_K;
+			do_use_rdi = 1;
 		end
 		if (is_nop) begin
 			// NOP. relax!
 		end
+
+`ifdef CONFIG_LDS
 		if (is_lds) begin
 			// LDS rdi,i  / STS i,rdi
 			// No sreg update
@@ -622,6 +613,7 @@ module risc8_core(
 			2'b10: do_data_load = 1;
 			endcase
 		end
+`endif
 		if (is_ld_xyz) begin
 			case(opcode[3:2])
 			2'b00: sel_Ra = BASE_Z;
@@ -996,6 +988,17 @@ module risc8_core(
 			end else
 			if (data_read[op_bit_select] == op_bit_set)
 				next_skip = 1;
+		end
+
+
+		/*
+		 * Micro-ops
+		 */
+		if (do_use_rdi) begin
+			sel_Ra = op_Rdi;
+			sel_Rd = op_Rdi;
+			alu_const = 1;
+			alu_const_value = op_K;
 		end
 
 		// post-decrement the stack pointer

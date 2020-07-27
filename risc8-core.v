@@ -19,7 +19,7 @@
 `ifndef _risc8_core_v_
 `define _risc8_core_v_
 `include "risc8-alu.v"
-`include "regfile.v"
+`include "risc8-regs.v"
 
 
 module risc8_core(
@@ -54,7 +54,7 @@ module risc8_core(
 	wire [7:0] reg_Rb;
 
 
-	regfile regs(
+	risc8_regs regs(
 		.clk(clk),
 		.reset(reset),
 		// Read ports. Rd is 8 or 16 bits, Rr is always 8

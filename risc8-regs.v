@@ -1,5 +1,5 @@
-`ifndef _regfile_v_
-`define _regfile_v_
+`ifndef _risc8_regfile_v_
+`define _risc8_regfile_v_
 
 /*
  * The block RAM regfile has a limitation that writes are not available
@@ -7,7 +7,7 @@
  *
  * The A register can be a pair of registers, while the B is always one byte.
  */
-module regfile(
+module risc8_regs(
 	input clk,
 	input reset,
 

@@ -334,6 +334,10 @@ module risc8_core(
 	/*******************************/
 	reg do_sp_push;
 	reg do_sp_pop;
+	reg do_ldst;
+	reg do_alu_ldst;
+	reg do_reg_ldst;
+	reg do_data_load;
 
 	always @(*) begin
 
@@ -354,8 +358,14 @@ module risc8_core(
 		next_temp = temp;
 		force_PC = 0;
 		next_SP = reg_SP;
+
+		// micro-ops
 		do_sp_push = 0;
 		do_sp_pop = 0;
+		do_ldst = 0;
+		do_alu_ldst = 0;
+		do_reg_ldst = 0;
+		do_data_load = 0;
 
 
 		// Default is to not store, but if commiting to the register
@@ -594,7 +604,7 @@ module risc8_core(
 			// 2 cycles
 			// Load or store instructions
 			// followed by 16-bit immediate SRAM address
-			sel_Ra = op_Rdi;
+			sel_Rb = op_Rdi;
 			sel_Rd = op_Rdi;
 
 			case(cycle)
@@ -607,26 +617,9 @@ module risc8_core(
 			end
 			2'b01: begin
 				next_addr = cdata;
-				if (op_is_store) begin
-					// STS: write to that address
-					// no extra cycle required
-					next_wdata = reg_Ra[7:0];
-					next_wen = 1;
-				end else begin
-					// LDS: request a read of the addr
-					// wait at this PC
-					next_cycle = 2;
-					next_ren = 1;
-				end
+				do_ldst = 1;
 			end
-			2'b10: begin
-				// only LDS, store the data read
-				// into Rdi
-				alu_op = `OP_MOVR;
-				alu_store = 1;
-				alu_const = 1;
-				alu_const_value = data_read;
-			end
+			2'b10: do_data_load = 1;
 			endcase
 		end
 		if (is_ld_xyz) begin
@@ -668,29 +661,13 @@ module risc8_core(
 				// pointer word is in Ra, d is in Rb,
 				// for a pre-decrement, pointer-1 is in alu_out
 				if (opcode[1:0] == 2'b10)
-					next_addr = alu_out;
+					do_alu_ldst = 1;
 				else
-					next_addr = reg_Ra;
-
-				if (op_is_store) begin
-					// STS (no extra cycle needed)
-					next_wen = 1;
-					next_wdata = reg_Rb;
-				end else begin
-					// LD (one more cycle required)
-					next_ren = 1;
-					next_cycle = 2;
-				end
+					do_reg_ldst = 1;
 			end
 			2'b10: begin
-				// extra cycle only for LD
-				// the memory has loaded the value,
-				// so use the ALU to store into Rd
-				alu_op = `OP_MOVR;
 				sel_Rd = op_Rd;
-				alu_store = 1;
-				alu_const = 1;
-				alu_const_value = data_read;
+				do_data_load = 1;
 			end
 			endcase
 		end
@@ -713,29 +690,8 @@ module risc8_core(
 				
 				next_cycle = 1;
 			end
-			2'b01: begin
-				// reg + Q is in the alu, d is in Rb,
-				next_addr = alu_out;
-
-				if (op_is_store) begin
-					// STS (no extra cycle needed)
-					next_wen = 1;
-					next_wdata = reg_Rb;
-				end else begin
-					// LD (one more cycle required)
-					next_ren = 1;
-					next_cycle = 2;
-				end
-			end
-			2'b10: begin
-				// extra cycle only for LD
-				// the memory has loaded the value,
-				// so use the ALU to store into Rd
-				alu_op = `OP_MOVR;
-				alu_store = 1;
-				alu_const = 1;
-				alu_const_value = data_read;
-			end
+			2'b01: do_alu_ldst = 1;
+			2'b10: do_data_load = 1;
 			endcase
 		end
 		if (is_lpm) begin
@@ -806,28 +762,24 @@ module risc8_core(
 */
 		if (is_push) begin
 			// PUSH Rd
-			if(cycle[0] == 0) begin
-				// just delay until we have the Rd available
-				// in register A
+			next_wdata = reg_Ra[7:0];
+
+			// delay one cycle until we have the Rd available
+			// in register A
+			if(cycle[0] == 0)
 				next_cycle = 1;
-			end else begin
-				// enqueue the write
-				next_wdata = reg_Ra[7:0];
+			else
 				do_sp_push = 1;
-			end
 		end
 
 		if (is_pop) begin
 			// POP Rd
-			if(cycle[0] == 0) begin
-				// start the read
+			// start the read and load the data into Rd
+			// once it is ready
+			if(cycle[0] == 0)
 				do_sp_pop = 1;
-			end else begin
-				alu_op = `OP_MOVR;
-				alu_store = 1;
-				alu_const = 1;
-				alu_const_value = data_read;
-			end
+			else
+				do_data_load = 1;
 		end
 
 		if (is_clx_or_sex) begin
@@ -850,7 +802,7 @@ module risc8_core(
 			2'b01: begin
 				do_sp_pop = 1;
 				next_temp[7:0] = data_read;
-				next_cycle = cycle + 1;
+				next_cycle = 2;
 			end
 			2'b10: begin
 				next_PC = { temp[7:0], data_read };
@@ -947,10 +899,10 @@ module risc8_core(
 			// IJMP Z - Indirect jump/call to Z or EIND:Z
 			// 16'b1001_010?_000?_1001:
 			// 2 cycles
-			if(cycle[0] == 0) begin
+			sel_Ra = BASE_Z;
+			if(cycle[0] == 0)
 				next_cycle = 1;
-				sel_Ra = BASE_Z;
-			end else
+			else
 				next_PC = reg_Ra;
 		end
 
@@ -1061,6 +1013,44 @@ module risc8_core(
 			next_addr = reg_SP + 1;
 			next_SP = reg_SP + 1;
 		end
+
+		// complete a load/store using either the ALU
+		// or Ra output
+		if (do_alu_ldst) begin
+			next_addr = alu_out;
+			do_ldst = 1;
+		end
+		if (do_reg_ldst) begin
+			next_addr = reg_Ra;
+			do_ldst = 1;
+		end
+
+		// continue a load from the address in next_addr,
+		// using the data into Rb. This must be called
+		// on cycle 1 (or else the next_cycle will be wrong).
+		if (do_ldst) begin
+			if (op_is_store) begin
+				// STS (no extra cycle needed)
+				next_wen = 1;
+				next_wdata = reg_Rb;
+			end else begin
+				// LD (one more cycle required)
+				next_ren = 1;
+				next_cycle = 2;
+			end
+		end
+
+		// finish a load by copying the data into Rd
+		if (do_data_load) begin
+			// extra cycle only for LD
+			// the memory has loaded the value,
+			// so use the ALU to store into Rd
+			alu_op = `OP_MOVR;
+			alu_store = 1;
+			alu_const = 1;
+			alu_const_value = data_read;
+		end
+
 	end // skip
 	end
 endmodule

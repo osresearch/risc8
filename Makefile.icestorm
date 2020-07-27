@@ -67,6 +67,7 @@ PNR ?= $(ICEPATH)nextpnr-ice40
 		mv $<.tmp $<.new ; \
 	done
 	$(ICEPATH)icepack $<.new $@
+	$(RM) $<.new
 
 # Generate a desired MHz pll
 pll_%.v:

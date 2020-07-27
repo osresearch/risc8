@@ -90,6 +90,7 @@ $(foreach t,$(TEST-y),$(eval $(call make-test,$t)))
 	iverilog \
 		-o $@ \
 		-s top \
+		-D "RISC8_PROGRAM=\"$(PROGRAM)\"" \
 		-M $(dir $@).$(basename $@).m \
 		$^
 	sed -i -e '1s/^/$@: /'  -e 's/$$/ \\/' $(dir $@).$(basename $@).m

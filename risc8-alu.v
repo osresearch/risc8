@@ -62,10 +62,13 @@ module risc8_alu(
 	wire R15 = R_out[15];
 	wire C = sreg_in[0];
 	wire opt_C = use_carry ? C : 0; // Optional Carry
+	wire R_zero = R == 0;
+	reg sreg_default_snz;
 
 	always @(*) begin
 		{Rh, R} = Rd_in;
 		{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg_in;
+		sreg_default_snz = 1;
 
 		case(op)
 		`OP_ADD: begin
@@ -73,10 +76,7 @@ module risc8_alu(
 `ifdef SREG_H
 			SH = (Rd3 & Rr3) | (Rr3 & !R3) | (!R3 & Rd3);
 `endif
-			SS = SN^SV;
 			SV = (Rd7 & Rr7 & !R7) | (!Rd7 & !Rr7 & R7);
-			SN = R7;
-			SZ = R == 0;
 			SC = (Rd7 & R7) | (Rr7 & !R7) | (!R7 & Rd7);
 		end
 		`OP_SUB: begin
@@ -84,10 +84,7 @@ module risc8_alu(
 `ifdef SREG_H
 			SH = (!Rd3 & Rr3) | (Rr3 & R3) | (R3 & !Rd3);
 `endif
-			SS = SN^SV;
 			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
-			SN = R7;
-			SZ = R == 0;
 			SC = (!Rd7 & Rr7) | (Rr7 & R7) | (R7 & !Rd7);
 		end
 		`OP_ADW, `OP_SBW: begin
@@ -104,6 +101,7 @@ module risc8_alu(
 			SV = !Rdh7 & R15;
 			SN = R15;
 			SZ = { Rh, R } == 0;
+			sreg_default_snz = 0;
 		end
 /*
 		// need to infer a multiplier
@@ -119,51 +117,35 @@ module risc8_alu(
 			SH = R3 | !Rd3;
 `endif
 			SV = R == 8'h80;
-			SN = R7;
 			SC = R != 0;
-			SZ = R == 0;
-			SS = SN^SV;
 		end
 		`OP_SWAP: begin
 			R = { Rd[3:0], Rd[7:4] };
 			// no sreg update
+			sreg_default_snz = 0;
 		end
 		`OP_ASR, `OP_ROR: begin
 			R = { op[0] ? C : Rd[7], Rd[7:1] };
 			SS = SN^SV;
-			SV = SN^SC;
-			SN = R7;
-			SZ = R == 0;
 			SC = Rd[0];
 		end
 		`OP_LSR: begin
 			R = { 1'b0, Rd[7:1] };
 			SS = SN^SV;
-			SV = SN^SC;
-			SN = 0;
-			SZ = R == 0;
 			SC = Rd[0];
+			// SN = 0; // this breaks negative flag
 		end
 		`OP_AND: begin
 			R = Rd & Rr;
-			SS = SN^SV;
 			SV = 0;
-			SN = R7;
-			SZ = R == 0;
 		end
 		`OP_EOR: begin
 			R = Rd ^ Rr;
-			SS = SN^SV;
 			SV = 0;
-			SN = R7;
-			SZ = R == 0;
 		end
 		`OP_OR: begin
 			R = Rd | Rr;
-			SS = SN^SV;
 			SV = 0;
-			SN = R7;
-			SZ = R == 0;
 		end
 		`OP_SREG: begin
 			(* full_case *)
@@ -177,18 +159,28 @@ module risc8_alu(
 			3'b110: ST = use_carry;
 			3'b111: SI = use_carry;
 			endcase
+			sreg_default_snz = 0;
 		end
 		`OP_MOVE: begin
 			// Default will copy {R,Rh} <= Rd
 			// Do not modify any SREG
+			sreg_default_snz = 0;
 		end
 		`OP_MOVR: begin
 			// Copy the Rb input byte to the output
 			// Do not modify any SREG
 			Rh = 0;
 			R = Rr;
+			sreg_default_snz = 0;
 		end
 		endcase
+
+		// many operations reuse this calculation
+		if (sreg_default_snz) begin
+			SS = SN^SV;
+			SN = R7;
+			SZ = R_zero;
+		end
 	end
 
 endmodule

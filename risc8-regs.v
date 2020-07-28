@@ -55,7 +55,7 @@ module risc8_regs(
 		// default source is from the ram read
 		// with the correct byte selected from the a and b address
 		al_src <= { 1'b0, a[0] };
-		ah_src <= 2'b01;
+		ah_src <= { 1'b0, 1'b1 };
 		bl_src <= { 1'b0, b[0] };
 
 		if (write) begin
@@ -73,7 +73,7 @@ module risc8_regs(
 						al_src <= 2'b10;
 						ah_src <= 2'b11;
 					end else
-					if (a[1] == 1) begin
+					if (a[0] == 1) begin
 						// replace bottom byte from top byte
 						al_src <= 2'b11;
 					end 

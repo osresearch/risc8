@@ -70,6 +70,7 @@ module risc8_alu(
 		{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg_in;
 		sreg_default_snz = 1;
 
+		(* fullcase *)
 		case(op)
 		`OP_MOVE: begin
 			// Default will copy {R,Rh} <= Rd
@@ -165,14 +166,14 @@ module risc8_alu(
 			endcase
 			sreg_default_snz = 0;
 		end
-`ifdef CONFIG_MULU
 		// need to infer a multiplier
 		`OP_MUL: begin
+`ifdef CONFIG_MULU
 			{ Rh, R } = Rd * Rr;
 			SC = R15;
 			SZ = { Rh, R } == 0;
-		end
 `endif
+		end
 		endcase
 
 		// many operations reuse this calculation

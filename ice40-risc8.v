@@ -1,4 +1,5 @@
 `default_nettype none
+`define UART_DIV 5
 `include "risc8-soc.v"
 
 module top(
@@ -21,7 +22,8 @@ module top(
 	reg [2:0] clk_div;
 	always @(posedge clk_48)
 		clk_div <= clk_div + 1;
-	wire clk = clk_div[1]; // 12 MHz
+	//wire clk = clk_div[1]; // 12 MHz
+	wire clk = clk_div[2]; // 6 MHz
 
 	assign led_r = ~port_b[0];
 	assign led_g = ~port_b[1];

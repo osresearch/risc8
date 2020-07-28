@@ -4,6 +4,9 @@
  * IO bus peripherals.
  */
 `include "uart.v"
+`ifndef UART_DIV
+`define UART_DIV 5
+`endif
 
 module risc8_uart(
 	input clk,
@@ -20,7 +23,7 @@ module risc8_uart(
 	output tx_out
 );
 	parameter BASE = 7'h2D;
-	reg [7:0] uart_baud_div = 12 - 1; // 12 Mhz / 12 == 1 megabaud
+	reg [7:0] uart_baud_div = `UART_DIV;
 	reg [7:0] uart_tx_data;
 	reg uart_tx_strobe;
 	wire uart_tx_ready;

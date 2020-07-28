@@ -118,6 +118,9 @@ module risc8_soc(
 		if (portb_valid) rdata = portb_data;
 	end
 
+	always @(posedge clk)
+		if (wen) $display("WR %04x <= %02x", addr, wdata);
+
 	risc8_core core(
 		.clk(clk),
 		.reset(reset),

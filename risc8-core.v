@@ -247,10 +247,18 @@ module risc8_core(
 			$display("INVALID %04x", opcode);
 	end
 
-	wire [5:0] instr;
+	wire [4:0] instr;
+	wire [3:0] is_alu_op;
+	wire is_alu_rdi;
+	wire is_alu_store;
+	wire is_alu_carry;
 	risc8_instruction decoder(
 		.opcode(opcode),
-		.instr(instr)
+		.instr(instr),
+		.alu_op(is_alu_op),
+		.alu_store(is_alu_store),
+		.alu_carry(is_alu_carry),
+		.alu_rdi(is_alu_rdi)
 	);
 
 	/*******************************/
@@ -260,7 +268,6 @@ module risc8_core(
 	reg do_alu_ldst;
 	reg do_reg_ldst;
 	reg do_data_load;
-	reg do_use_rdi;
 
 	always @(*) begin
 		// start pre-fetching the next PC if we are not in reset
@@ -289,7 +296,6 @@ module risc8_core(
 		do_alu_ldst = 0;
 		do_reg_ldst = 0;
 		do_data_load = 0;
-		do_use_rdi = 0;
 
 		// Default is to not store, but if commiting to the register
 		// file is selected, then to store to the Rd value
@@ -320,106 +326,19 @@ module risc8_core(
 
 		(* full_case *)
 		case(instr)
-		`is_cpc: begin
-			// CPC Rd,Rr (no dest, only sreg)
-			alu_op = `OP_SUB;
-			alu_carry = 1;
+		`is_alu: begin
+			alu_op = is_alu_op;
+			alu_carry = is_alu_carry;
+			alu_store = is_alu_store;
+
+			if (is_alu_rdi) begin
+				sel_Ra = op_Rdi;
+				sel_Rd = op_Rdi;
+				alu_const = 1;
+				alu_const_value = op_K;
+			end
 		end
-		`is_cp: begin
-			// CP Rd,Rr (no dest, only sreg)
-			alu_op = `OP_SUB;
-		end
-		`is_sbc: begin
-			// SBC Rd,Rr
-			alu_op = `OP_SUB;
-			alu_carry = 1;
-			alu_store = 1;
-		end
-		`is_sub: begin
-			// SUB Rd,Rr
-			alu_op = `OP_SUB;
-			alu_store = 1;
-		end
-		`is_add: begin
-			// ADD Rd,Rr / LSL Rd when Rd=Rr
-			alu_op = `OP_ADD;
-			alu_store = 1;
-		end
-		`is_adc: begin
-			// ADC Rd,Rr / ROL Rd when Rd=Rr
-			alu_op = `OP_ADD;
-			alu_store = 1;
-			alu_carry = 1;
-		end
-		`is_and: begin
-			// AND Rd,Rr
-			alu_store = 1;
-			alu_op = `OP_AND;
-		end
-		`is_eor: begin
-			// EOR Rd,Rr
-			alu_store = 1;
-			alu_op = `OP_EOR;
-		end
-		`is_or: begin
-			// OR Rd,Rr
-			alu_store = 1;
-			alu_op = `OP_OR;
-		end
-		`is_mov: begin
-			// MOV Rd,Rr (no sreg updates)
-			alu_store = 1;
-			alu_op = `OP_MOVR;
-		end
-		`is_subi: begin
-			// SUBI Rdi, K
-			alu_op = `OP_SUB;
-			do_use_rdi = 1;
-			alu_store = 1;
-		end
-		`is_sbci: begin
-			// SBCI Rdi, K
-			alu_op = `OP_SUB;
-			alu_store = 1;
-			alu_carry = 1;
-			do_use_rdi = 1;
-		end
-		`is_cpi: begin
-			// CPI Rdi, K
-			alu_op = `OP_SUB;
-			do_use_rdi = 1;
-		end
-		`is_ori: begin
-			// ORI Rd,K or SBR Rd, K
-			alu_op = `OP_OR;
-			alu_store = 1;
-			do_use_rdi = 1;
-		end
-		`is_andi: begin
-			// ANDI Rd,K or CBR Rd, K
-			alu_op = `OP_AND;
-			alu_store = 1;
-			do_use_rdi = 1;
-		end
-		`is_com: begin
-			// COM Rd
-			alu_op = `OP_EOR;
-			alu_store = 1;
-			alu_const = 1;
-			alu_const_value = 8'hFF;
-		end
-		`is_neg: begin
-			// NEG Rd
-			// 16'b1001_010?_????_0001: begin
-			alu_op = `OP_NEG;
-			alu_store = 1;
-		end
-		`is_swap: begin
-			// SWAP Rd, no sreg updates
-			// 16'b1001_010?__????_0010: begin
-			alu_store = 1;
-			alu_op = `OP_SWAP;
-		end
+
 		`is_inc: begin
 			// INC Rd
 			alu_op = `OP_ADD;
@@ -427,27 +346,20 @@ module risc8_core(
 			alu_const = 1;
 			alu_const_value = 1;
 		end
-		`is_asr: begin
-			// ASR Rd
-			alu_op = `OP_ASR;
-			alu_store = 1;
-		end
-		`is_lsr: begin
-			// LSR Rd
-			alu_op = `OP_LSR;
-			alu_store = 1;
-		end
-		`is_ror: begin
-			// ROR Rd
-			alu_op = `OP_ROR;
-			alu_store = 1;
-		end
 		`is_dec: begin
 			// DEC Rd
 			alu_op = `OP_SUB;
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 1;
+		end
+
+		`is_com: begin
+			// COM Rd
+			alu_op = `OP_EOR;
+			alu_store = 1;
+			alu_const = 1;
+			alu_const_value = 8'hFF;
 		end
 		`is_adiw_or_sbiw: begin
 			// ADIW/SBIW Rp, uimm6
@@ -470,12 +382,6 @@ module risc8_core(
 			alu_word = 1;
 			alu_store = 1;
 		end
-		`is_ldi: begin
-			// LDI Rdi, K (no sreg updates)
-			alu_op = `OP_MOVR;
-			alu_store = 1;
-			do_use_rdi = 1;
-		end
 		`is_clx_or_sex: begin
 			// Status register update bit
 			// 16'b1001_0100_1???_1000: CLx
@@ -484,10 +390,6 @@ module risc8_core(
 			alu_carry = opcode[7];
 			alu_const = 1;
 			alu_const_value = opcode[6:4];
-		end
-
-		`is_nop: begin
-			// NOP. relax!
 		end
 `ifdef CONFIG_MULU
 		`is_mulu: begin
@@ -707,23 +609,33 @@ module risc8_core(
 			// LAT Z,Rd
 			invalid_op = 1;
 		end
+		if (do_ldst) begin
+			if (op_is_store) begin
+				// STS (no extra cycle needed)
+				next_wen = 1;
+				next_wdata = reg_Rb;
+			end else begin
+				// LD (one more cycle required)
+				next_ren = 1;
+				next_cycle = 2;
+			end
+		end
 */
 		`is_push: begin
-			// PUSH Rd
 			next_wdata = reg_Ra[7:0];
 
-			// delay one cycle until we have the Rd available
-			// in register A
+			// PUSH Rd
+			// delay one cycle until we have the Rd
+			// available in register A
 			if(cycle[0] == 0)
 				next_cycle = 1;
 			else
 				do_sp_push = 1;
 		end
-
 		`is_pop: begin
 			// POP Rd
 			// start the read and load the data into Rd
-			// once it is ready
+			// once it is ready on the next cycle
 			if(cycle[0] == 0)
 				do_sp_pop = 1;
 			else
@@ -896,12 +808,6 @@ module risc8_core(
 		/*
 		 * Micro-ops
 		 */
-		if (do_use_rdi) begin
-			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
-			alu_const = 1;
-			alu_const_value = op_K;
-		end
 
 		// post-decrement the stack pointer
 		// and start a write of next_wdata to the stack

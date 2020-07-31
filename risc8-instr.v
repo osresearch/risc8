@@ -7,71 +7,73 @@
  * The single cycle instructions are grouped first.
  */
 
-`define is_invalid	6'h00
+// Single cycle arithmetic operators mostly go straight to the alu
+// op Rd, Rr
+`define is_alu		5'h00
 
-// Single cycle arithmetic operators
-`define is_cpc		6'h01
-`define is_cp		6'h02
-`define is_sbc		6'h03
-`define is_sub		6'h04
-`define is_add		6'h05
-`define is_adc		6'h06
-`define is_and		6'h07
-`define is_eor		6'h08
-`define is_or		6'h09
-`define is_mov		6'h0a
-`define is_subi		6'h0b
-`define is_sbci		6'h0c
-`define is_cpi		6'h0d
-`define is_ori		6'h0e
-`define is_andi		6'h0f
-`define is_com		6'h10
-`define is_neg		6'h11
-`define is_swap		6'h12
-`define is_inc		6'h13
-`define is_asr		6'h14
-`define is_lsr		6'h15
-`define is_ror		6'h16
-`define is_dec		6'h17
-`define is_adiw_or_sbiw	6'h18
-`define is_movw		6'h19
-`define is_ldi		6'h1a
-`define is_clx_or_sex	6'h1b
-`define is_mulu		6'h1c
-`define is_nop		6'h1f
+// although some require special handling
+`define is_inc		5'h01
+`define is_dec		5'h02
+`define is_com		5'h03
+`define is_adiw_or_sbiw	5'h04
+`define is_movw		5'h05
+`define is_clx_or_sex	5'h06
+`define is_mulu		5'h07
 
 // Memory instructions
-`define is_out		6'h20
-`define is_in		6'h21
-`define is_lds		6'h22
-`define is_ld_xyz	6'h23
-`define is_ld_yz_plus_q	6'h24
-`define is_lpm		6'h25
-`define is_push		6'h26
-`define is_pop		6'h27
+`define is_out		5'h08
+`define is_in		5'h09
+`define is_lds		5'h0a
+`define is_ld_xyz	5'h0b
+`define is_ld_yz_plus_q	5'h0c
+`define is_lpm		5'h0d
+`define is_pop		5'h0e
+`define is_push		5'h0f
 
 // Control flow instructions
-`define is_ret		6'h30
-`define is_cpse		6'h31
-`define is_sbrc_or_sbrs	6'h32
-`define is_brbc_or_brbs	6'h33
-`define is_jmp		6'h34
-`define is_call		6'h35
-`define is_ijmp		6'h36
-`define is_rjmp		6'h37
-`define is_rcall	6'h38
-`define is_sbis_or_sbic	6'h39
+`define is_ret		5'h10
+`define is_cpse		5'h11
+`define is_sbrc_or_sbrs	5'h12
+`define is_brbc_or_brbs	5'h13
+`define is_jmp		5'h14
+`define is_call		5'h15
+`define is_ijmp		5'h16
+`define is_rjmp		5'h17
+`define is_rcall	5'h18
+`define is_sbis_or_sbic	5'h19
 
 module risc8_instruction(
 	input [15:0] opcode,
-	output [5:0] instr,
-	output [5:0] Rd,
-	output [5:0] Rr
+	output [4:0] instr,
+	output [3:0] alu_op,
+	output alu_rdi,
+	output alu_store,
+	output alu_carry
 );
+	// Register in the opcode
+	wire [5:0] op_Rd = opcode[8:4]; // 0-31
 
 	/* Instruction decoding */
-	reg [5:0] instr;
-	wire [5:0] op_Rd = opcode[8:4]; // 0-31
+	reg [4:0] instr;
+	reg [3:0] alu_op;
+	reg alu_store;
+	reg alu_carry;
+	reg alu_rdi;
+
+`define ALU_OP(op, store, carry) \
+	begin \
+		alu_op = op; \
+		alu_store = store; \
+		alu_carry = carry; \
+	end
+
+`define ALU_OP_RDI(op, store, carry) \
+	begin \
+		alu_op = op; \
+		alu_store = store; \
+		alu_carry = carry; \
+		alu_rdi = 1; \
+	end
 
 	/*
 	 * Match instructions on every bit except for the
@@ -79,27 +81,31 @@ module risc8_instruction(
 	 * for almost every instruction.
 	 */
 	always @(*) begin
-		instr = `is_invalid; 
+		instr = `is_alu;
+		alu_op = 0;
+		alu_store = 0;
+		alu_carry = 0;
+		alu_rdi = 0;
 
 		casez({opcode[15:9],opcode[3:0]})
-		11'b0000_000_0000: if (op_Rd == 5'b0000) instr = `is_nop;
+		11'b0000_000_0000: if (op_Rd == 5'b0000) `ALU_OP(`OP_AND, 0, 0) // NOP
 		11'b0000_000_????: if (opcode[8] == 1'b1) instr = `is_movw;
-		11'b0000_01?_????: instr = `is_cpc;
-		11'b0000_10?_????: instr = `is_sbc;
-		11'b0000_11?_????: instr = `is_add; // also LSL
+		11'b0000_01?_????: `ALU_OP(`OP_SUB, 0, 1) // CPC Rd,Rr
+		11'b0000_10?_????: `ALU_OP(`OP_SUB, 1, 1) // SBC Rd, Rr
+		11'b0000_11?_????: `ALU_OP(`OP_ADD, 1, 0) // ADD Rd, Rd
 		11'b0001_00?_????: instr = `is_cpse;
-		11'b0001_01?_????: instr = `is_cp;
-		11'b0001_10?_????: instr = `is_sub;
-		11'b0001_11?_????: instr = `is_adc; // also ROL
-		11'b0010_00?_????: instr = `is_and;
-		11'b0010_01?_????: instr = `is_eor;
-		11'b0010_10?_????: instr = `is_or;
-		11'b0010_11?_????: instr = `is_mov;
-		11'b0011_???_????: instr = `is_cpi;
-		11'b0100_???_????: instr = `is_sbci;
-		11'b0101_???_????: instr = `is_subi;
-		11'b0110_???_????: instr = `is_ori;
-		11'b0111_???_????: instr = `is_andi;
+		11'b0001_01?_????: `ALU_OP(`OP_SUB, 0, 0) // CP Rd,Rr
+		11'b0001_10?_????: `ALU_OP(`OP_SUB, 1, 0) // SUB Rd, Rr
+		11'b0001_11?_????: `ALU_OP(`OP_ADD, 1, 1) // ADC Rd, Rr
+		11'b0010_00?_????: `ALU_OP(`OP_AND, 1, 0) // AND Rd, Rr
+		11'b0010_01?_????: `ALU_OP(`OP_EOR, 1, 0) // EOR Rd, Rr
+		11'b0010_10?_????: `ALU_OP(`OP_OR,  1, 0) // OR Rd, Rr
+		11'b0010_11?_????: `ALU_OP(`OP_MOVR, 1, 0) // MOV Rd, Rr
+		11'b0011_???_????: `ALU_OP_RDI(`OP_SUB, 0, 0) // CPI Rdi, K
+		11'b0100_???_????: `ALU_OP_RDI(`OP_SUB, 1, 1) // SBCI Rdi, K
+		11'b0101_???_????: `ALU_OP_RDI(`OP_SUB, 1, 0) // SUBI Rdi, K
+		11'b0110_???_????: `ALU_OP_RDI(`OP_OR, 1, 0) // ORI Rdi, K
+		11'b0111_???_????: `ALU_OP_RDI(`OP_AND, 1, 0) // ANDI Rdi, K
 		11'b1001_00?_0000: instr = `is_lds;
 		11'b1001_000_010?: instr = `is_lpm; // Z
 		11'b1000_00?_0000: instr = `is_ld_xyz; // z
@@ -115,13 +121,13 @@ module risc8_instruction(
 		11'b1001_000_1111: instr = `is_pop;
 		11'b1001_001_1111: instr = `is_push;
 		11'b1001_010_0000: instr = `is_com;
-		11'b1001_010_0001: instr = `is_neg;
-		11'b1001_010_0010: instr = `is_swap;
-		11'b1001_010_0011: instr = `is_inc;
+		11'b1001_010_0001: `ALU_OP(`OP_NEG, 1, 0) // NEG Rd
+		11'b1001_010_0010: `ALU_OP(`OP_SWAP, 1, 0) // SWAP Rd
+		11'b1001_010_0011: instr = `is_inc; // INC Rd
 		//11'b1001_010?_0100: instr = `is_nop; // reserved
-		11'b1001_010_0101: instr = `is_asr;
-		11'b1001_010_0110: instr = `is_lsr;
-		11'b1001_010_0111: instr = `is_ror;
+		11'b1001_010_0101: `ALU_OP(`OP_ASR, 1, 0) // ASR Rd
+		11'b1001_010_0110: `ALU_OP(`OP_LSR, 1, 0) // LSR Rd
+		11'b1001_010_0111: `ALU_OP(`OP_ROR, 1, 0) // ROR Rd
 		11'b1001_010_1000: begin
 			casez(opcode[8:4])
 			5'b0????: instr = `is_clx_or_sex;
@@ -130,17 +136,17 @@ module risc8_instruction(
 			endcase
 		end
 		11'b1001_010_1001: instr = `is_ijmp;
-		11'b1001_010_1010: instr = `is_dec;
+		11'b1001_010_1010: instr = `is_dec; // DEC Rd
 		11'b1001_010_110?: instr = `is_jmp;
 		11'b1001_010_1111: instr = `is_call;
 		11'b1001_011_????: instr = `is_adiw_or_sbiw;
-		//12'b1001_11??_????: instr = `is_mulu; // need to infer multiply
+		11'b1001_11?_????: instr = `is_mulu;
 		11'b1001_10?_????: instr = `is_sbis_or_sbic;
 		11'b1011_0??_????: instr = `is_in;
 		11'b1011_1??_????: instr = `is_out;
 		11'b1100_???_????: instr = `is_rjmp;
 		11'b1101_???_????: instr = `is_rcall;
-		11'b1110_???_????: instr = `is_ldi; // also SER, with all 1
+		11'b1110_???_????: `ALU_OP_RDI(`OP_MOVR, 1, 0) // LDI Rdi, K also SER, with all 1
 		11'b1111_0??_????: instr = `is_brbc_or_brbs;
 		11'b1111_11?_0???: instr = `is_sbrc_or_sbrs;
 		endcase
@@ -148,4 +154,3 @@ module risc8_instruction(
 endmodule
 
 `endif
-

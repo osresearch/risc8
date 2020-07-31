@@ -168,7 +168,6 @@ module risc8_core(
 
 	wire [15:0] alu_Rd = reg_Ra;
 	wire [ 7:0] alu_Rr = prev_alu_const ? prev_alu_const_value : reg_Rb; // sometimes a constant value
-	//reg [ 7:0] alu_Rr;
 
 	risc8_alu core_alu(
 		.clk(clk),
@@ -242,7 +241,6 @@ module risc8_core(
 		prev_alu_const_value <= alu_const_value;
 		prev_alu_word <= alu_word;
 
-		//alu_Rr <= alu_const ? alu_const_value : reg_Rb;
 		if (is_invalid)
 			$display("INVALID %04x", opcode);
 	end
@@ -306,7 +304,7 @@ module risc8_core(
 		alu_carry = 0;
 
 		// default is to select the Rd and Rr from the opcode,
-		// storing into Rd.  Some instructions modify these
+		// storing into Rd.  Most instructions modify these
 		alu_op = `OP_MOVE;
 		sel_Ra = op_Rd;
 		sel_Rb = op_Rr;

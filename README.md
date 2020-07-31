@@ -18,10 +18,14 @@ register write) and can retire one instruction per clock.
 Most instructions are single cycle, with some complex instructions like `IN`/`OUT`,
 `LD`/`ST` and `CALL`/`RET` that require multiple cycles.
 
-On an ice40up5k it uses approximately 1400 LC for the SOC with uart and gpio,
-and the fastest timing so far is 15.7 MHz.  64 KB of the SPRAM can be used
-for the SOC's data memory, although the program memory has to be in DPRAM
-so that it can be stored in the bitstream.
+On an ice40up5k it uses approximately 1400 LC for the SOC with uart and gpio
+with nearly the full instruction set (which will synthesize around 15.5 MHz).
+By removing some of the instructions the design can run up to 18 MHz,
+and overclocking is also possible.
+
+The ice40up5k's 64 KB of SPRAM can be used for the SOC's data memory,
+although the program memory has to be in DPRAM so that it can be stored
+in the bitstream.
 
 The two stage pipeline allows the register file to be stored in block RAM,
 which greatly reducing the number of logic cells required.  The register

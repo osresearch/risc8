@@ -25,6 +25,33 @@
 `include "risc8-regs.v"
 `include "risc8-instr.v"
 
+`define config_is_inc
+`define config_is_dec
+`define config_is_com
+`define config_is_adiw_or_sbiw
+`define config_is_movw
+`define config_is_clx_or_sex
+`define config_is_mulu
+`define config_is_out
+`define config_is_in
+`define config_is_lds
+`define config_is_ld_xyz
+`define config_is_ld_yz_plus_q
+`define config_is_lpm
+`define config_is_push
+`define config_is_pop
+`define config_is_ret
+`define config_is_cpse
+`define config_is_sbrc_or_sbrs
+`define config_is_brbc_or_brbs
+`define config_is_jmp
+`define config_is_call
+`define config_is_ijmp
+`define config_is_rjmp
+`define config_is_rcall
+`define config_is_sbis_or_sbic
+
+
 
 module risc8_core(
 	input clk,
@@ -337,6 +364,7 @@ module risc8_core(
 			end
 		end
 
+`ifdef config_is_inc
 		`is_inc: begin
 			// INC Rd
 			alu_op = `OP_ADD;
@@ -344,6 +372,8 @@ module risc8_core(
 			alu_const = 1;
 			alu_const_value = 1;
 		end
+`endif
+`ifdef config_is_dec
 		`is_dec: begin
 			// DEC Rd
 			alu_op = `OP_SUB;
@@ -351,7 +381,8 @@ module risc8_core(
 			alu_const = 1;
 			alu_const_value = 1;
 		end
-
+`endif
+`ifdef config_is_com
 		`is_com: begin
 			// COM Rd
 			alu_op = `OP_EOR;
@@ -359,6 +390,8 @@ module risc8_core(
 			alu_const = 1;
 			alu_const_value = 8'hFF;
 		end
+`endif
+`ifdef config_is_adiw_or_sbiw
 		`is_adiw_or_sbiw: begin
 			// ADIW/SBIW Rp, uimm6
 			sel_Ra = op_Rp;
@@ -373,6 +406,8 @@ module risc8_core(
 			else
 				alu_op = `OP_ADW;
 		end
+`endif
+`ifdef config_is_movw
 		`is_movw: begin
 			// MOVW Rd,Rr Move register pair
 			sel_Ra = { opcode[3:0], 1'b0 }; // will read both bytes
@@ -380,6 +415,8 @@ module risc8_core(
 			alu_word = 1;
 			alu_store = 1;
 		end
+`endif
+`ifdef config_is_clx_or_sex
 		`is_clx_or_sex: begin
 			// Status register update bit
 			// 16'b1001_0100_1???_1000: CLx
@@ -389,7 +426,8 @@ module risc8_core(
 			alu_const = 1;
 			alu_const_value = opcode[6:4];
 		end
-`ifdef CONFIG_MULU
+`endif
+`ifdef config_is_mulu
 		`is_mulu: begin
 			// MULU Rd, Rr => R1/R0
 			alu_op = `OP_MUL;
@@ -399,6 +437,7 @@ module risc8_core(
 		end
 `endif
 
+`ifdef config_is_out
 		// OUT to IO space (no sreg update)
 		// the ones for registers are handled here,
 		// otherwise the external controller will handle it
@@ -424,7 +463,9 @@ module risc8_core(
 				endcase
 			end
 		end
+`endif
 
+`ifdef config_is_in
 		// IN from IO space (no sreg update, should be 1 cycle)
 		// the registers ones are handled here, otherwise
 		// the external SOC will handle it.
@@ -445,7 +486,9 @@ module risc8_core(
 				endcase
 			end
 		end
+`endif
 
+`ifdef config_is_lds
 		`is_lds: begin
 			// LDS rdi,i  / STS i,rdi
 			// No sreg update
@@ -470,6 +513,9 @@ module risc8_core(
 			2'b10: do_data_load = 1;
 			endcase
 		end
+`endif
+
+`ifdef config_is_ld_xyz
 		`is_ld_xyz: begin
 			case(opcode[3:2])
 			2'b00: sel_Ra = BASE_Z;
@@ -519,6 +565,9 @@ module risc8_core(
 			end
 			endcase
 		end
+`endif
+
+`ifdef config_ld_yz_plus_q
 		`is_ld_yz_plus_q: begin
 			// ST / LD Rd, Y/Z+Q (no status update)
 			// Z+Q: 16'b10?0_????_????_0???:
@@ -542,6 +591,9 @@ module risc8_core(
 			2'b10: do_data_load = 1;
 			endcase
 		end
+`endif
+
+`ifdef config_is_lpm
 		`is_lpm: begin
 			// LPM/ELPM Rd, Z / Z+
 			sel_Ra = BASE_Z;
@@ -589,6 +641,7 @@ module risc8_core(
 			end
 			endcase
 		end
+`endif
 
 /*
 		16'b1001001_?????_0100: begin
@@ -619,6 +672,8 @@ module risc8_core(
 			end
 		end
 */
+
+`ifdef config_is_push
 		`is_push: begin
 			next_wdata = reg_Ra[7:0];
 
@@ -630,6 +685,9 @@ module risc8_core(
 			else
 				do_sp_push = 1;
 		end
+`endif
+
+`ifdef config_is_pop
 		`is_pop: begin
 			// POP Rd
 			// start the read and load the data into Rd
@@ -639,7 +697,9 @@ module risc8_core(
 			else
 				do_data_load = 1;
 		end
+`endif
 
+`ifdef config_is_ret
 		`is_ret: begin
 			// RET
 			case(cycle)
@@ -657,8 +717,10 @@ module risc8_core(
 			end
 			endcase
 		end
+`endif
 
-		// CPSE Rd,Rr (no sreg updates)
+`ifdef config_is_cpse
+		// CPSE Rd,Rr
 		`is_cpse: begin
 			// wait for Rd and Rr to be available
 			if (cycle[0] == 0)
@@ -667,7 +729,9 @@ module risc8_core(
 			if (reg_Ra[7:0] == reg_Rb)
 				next_skip = 1;
 		end
+`endif
 
+`ifdef config_is_sbrc_or_sbrs
 		// SBRC/SBRS skip if register bit b equals B
 		`is_sbrc_or_sbrs: begin
 			// 16'b1111_110?_????_0???, // SBRC
@@ -678,7 +742,9 @@ module risc8_core(
 			if (reg_Ra[op_bit_select] == op_bit_set)
 				next_skip = 1;
 		end
+`endif
 
+`ifdef config_is_brbc_or_brbs
 		// BRBS/BRBC - Branch if bit in SREG is set/clear
 		// this happens while the ALU is still computing the
 		// previous instruction, so use the next SREG value,
@@ -689,7 +755,9 @@ module risc8_core(
 			if (next_sreg[op_bit_select] != op_bit_set)
 				next_PC = reg_PC + simm7 + 1;
 		end
+`endif
 
+`ifdef config_is_jmp
 		`is_jmp: begin
 			// JMP abs22, 3 cycles
 			// 16'b1001_010?_????_110?:
@@ -711,7 +779,9 @@ module risc8_core(
 			end
 			endcase
 		end
+`endif
 
+`ifdef config_is_call
 		`is_call: begin
 			// CALL abs22
 			// 16'b1001_010?_????_111?:
@@ -742,7 +812,9 @@ module risc8_core(
 			end
 			endcase
 		end
+`endif
 
+`ifdef config_is_ijmp
 		`is_ijmp: begin
 			// IJMP Z - Indirect jump/call to Z or EIND:Z
 			// 16'b1001_010?_000?_1001:
@@ -753,14 +825,18 @@ module risc8_core(
 			else
 				next_PC = reg_Ra;
 		end
+`endif
 
+`ifdef config_is_rjmp
 		`is_rjmp: begin
 			// RJMP to PC + simm12
 			// 16'b1100_????????????:
 			// 2 cycles
 			next_PC = reg_PC + simm12 + 1;
 		end
+`endif
 
+`ifdef config_is_rcall
 		`is_rcall: begin
 			// RCALL to PC + simm12
 			// 16'b1101_????????????:
@@ -785,7 +861,9 @@ module risc8_core(
 			end
 			endcase
 		end
+`endif
 
+`ifdef config_is_sbis_or_sbic
 		// Skip if bit in IO space is set or clear.
 		`is_sbis_or_sbic: begin
 			if (cycle[0] == 0) begin
@@ -796,6 +874,7 @@ module risc8_core(
 			if (data_read[op_bit_select] == op_bit_set)
 				next_skip = 1;
 		end
+`endif
 
 		default: begin
 			is_invalid = 1;

@@ -25,16 +25,16 @@
 `include "risc8-regs.v"
 `include "risc8-instr.v"
 
-`define config_is_inc
-`define config_is_dec
+//`define config_is_inc
+//`define config_is_dec
 `define config_is_com
 `define config_is_adiw_or_sbiw
 `define config_is_movw
 `define config_is_clx_or_sex
-`define config_is_mulu
+//`define config_is_mulu
 `define config_is_out
 `define config_is_in
-`define config_is_lds
+//`define config_is_lds
 `define config_is_ld_xyz
 `define config_is_ld_yz_plus_q
 `define config_is_lpm
@@ -44,9 +44,9 @@
 `define config_is_cpse
 `define config_is_sbrc_or_sbrs
 `define config_is_brbc_or_brbs
-`define config_is_jmp
-`define config_is_call
-`define config_is_ijmp
+//`define config_is_jmp
+//`define config_is_call
+//`define config_is_ijmp
 `define config_is_rjmp
 `define config_is_rcall
 `define config_is_sbis_or_sbic

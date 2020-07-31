@@ -19,11 +19,11 @@
 `ifndef _risc8_core_v_
 `define _risc8_core_v_
 
-`define CONFIG_LDS
 //`define CONFIG_MULU
 
 `include "risc8-alu.v"
 `include "risc8-regs.v"
+`include "risc8-instr.v"
 
 
 module risc8_core(
@@ -113,7 +113,7 @@ module risc8_core(
 	assign data_ren = next_ren;
 	assign data_write = next_wdata;
 
-	reg invalid_op;
+	reg is_invalid;
 	reg alu_store;
 	reg alu_word;
 	reg alu_carry;
@@ -168,6 +168,7 @@ module risc8_core(
 
 	wire [15:0] alu_Rd = reg_Ra;
 	wire [ 7:0] alu_Rr = prev_alu_const ? prev_alu_const_value : reg_Rb; // sometimes a constant value
+	//reg [ 7:0] alu_Rr;
 
 	risc8_alu core_alu(
 		.clk(clk),
@@ -240,100 +241,17 @@ module risc8_core(
 		prev_alu_const <= alu_const;
 		prev_alu_const_value <= alu_const_value;
 		prev_alu_word <= alu_word;
+
+		//alu_Rr <= alu_const ? alu_const_value : reg_Rb;
+		if (is_invalid)
+			$display("INVALID %04x", opcode);
 	end
 
-	/* Instruction decoding */
-	reg is_nop, is_movw, is_cpc, is_sbc, is_add, is_cpse, is_cp;
-	reg is_sub, is_adc, is_and, is_eor, is_or, is_mov, is_ld_xyz;
-	reg is_lds, is_brbc_or_brbs, is_sbrc_or_sbrs, is_in, is_out;
-	reg is_cpi, is_sbci, is_subi, is_ori, is_andi, is_rjmp, is_rcall;
-	reg is_ldi, is_lpm, is_push, is_pop, is_com, is_neg, is_swap;
-	reg is_inc, is_asr, is_lsr, is_ror, is_ijmp, is_dec, is_jmp, is_call;
-	reg is_adiw_or_sbiw, is_ld_yz_plus_q, is_ret, is_clx_or_sex;
-	reg is_mulu, is_sbis_or_sbic;
-
-	always @(*) begin
-		is_nop = 0; is_movw = 0; is_cpc = 0; is_sbc = 0; is_add = 0;
-		is_cpse = 0; is_cp = 0; is_sub = 0; is_adc = 0; is_and = 0;
-		is_eor = 0; is_or = 0; is_mov = 0; is_ld_xyz = 0; is_lds = 0;
-		is_brbc_or_brbs = 0; is_sbrc_or_sbrs = 0; is_in = 0;
-		is_out = 0; is_cpi = 0; is_sbci = 0; is_subi = 0; is_ori = 0;
-		is_andi = 0; is_rjmp = 0; is_rcall = 0; is_ldi = 0; is_lpm = 0;
-		is_push = 0; is_pop = 0; is_com = 0; is_neg = 0; is_swap = 0;
-		is_inc = 0; is_asr = 0; is_lsr = 0; is_ror = 0; is_ijmp = 0;
-		is_dec = 0; is_jmp = 0; is_jmp = 0; is_call = 0; is_ret = 0;
-		is_adiw_or_sbiw = 0; is_ld_yz_plus_q = 0; is_clx_or_sex = 0;
-		is_mulu = 0; is_sbis_or_sbic = 0;
-
-		/*
-		 * Match instructions on every bit except for the
-		 * five Rd bits (opcode[8:4]), which are wildcard
-		 * for almost every instruction.
-		 */
-		casez({opcode[15:9],opcode[3:0]})
-		//11'b0000_000_0000: if (op_Rd == 5'b0000) is_nop = 1;
-		11'b0000_000_????: if (opcode[8] == 1'b1) is_movw = 1;
-		11'b0000_01?_????: is_cpc = 1;
-		11'b0000_10?_????: is_sbc = 1;
-		11'b0000_11?_????: is_add = 1; // also LSL
-		11'b0001_00?_????: is_cpse = 1;
-		11'b0001_01?_????: is_cp = 1;
-		11'b0001_10?_????: is_sub = 1;
-		11'b0001_11?_????: is_adc = 1; // also ROL
-		11'b0010_00?_????: is_and = 1;
-		11'b0010_01?_????: is_eor = 1;
-		11'b0010_10?_????: is_or = 1;
-		11'b0010_11?_????: is_mov = 1;
-		11'b0011_???_????: is_cpi = 1;
-		11'b0100_???_????: is_sbci = 1;
-		11'b0101_???_????: is_subi = 1;
-		11'b0110_???_????: is_ori = 1;
-		11'b0111_???_????: is_andi = 1;
-		11'b1001_00?_0000: is_lds = 1;
-		11'b1001_000_010?: is_lpm = 1; // Z
-		11'b1000_00?_0000: is_ld_xyz = 1; // z
-		11'b1000_00?_1000: is_ld_xyz = 1; // Y
-		11'b1000_00?_1100: is_ld_xyz = 1; // X
-		11'b1001_00?_0001: is_ld_xyz = 1; // Z+
-		11'b1001_00?_0010: is_ld_xyz = 1; // -Z
-		11'b1001_00?_1001: is_ld_xyz = 1; // Y+
-		11'b1001_00?_1010: is_ld_xyz = 1; // -Y
-		11'b1001_00?_1101: is_ld_xyz = 1; // X+
-		11'b1001_00?_1110: is_ld_xyz = 1; // -X
-		11'b10?0_???_????: is_ld_yz_plus_q = 1;
-		11'b1001_000_1111: is_pop = 1;
-		11'b1001_001_1111: is_push = 1;
-		11'b1001_010_0000: is_com = 1;
-		11'b1001_010_0001: is_neg = 1;
-		11'b1001_010_0010: is_swap = 1;
-		11'b1001_010_0011: is_inc = 1;
-		//11'b1001_010?_0100: is_nop = 1; // reserved
-		11'b1001_010_0101: is_asr = 1;
-		11'b1001_010_0110: is_lsr = 1;
-		11'b1001_010_0111: is_ror = 1;
-		11'b1001_010_1000: begin
-			casez(opcode[8:4])
-			5'b0????: is_clx_or_sex = 1;
-			5'b10000: is_ret = 1;
-			5'b11100: is_lpm = 1;
-			endcase
-		end
-		11'b1001_010_1001: is_ijmp = 1;
-		11'b1001_010_1010: is_dec = 1;
-		11'b1001_010_110?: is_jmp = 1;
-		11'b1001_010_1111: is_call = 1;
-		11'b1001_011_????: is_adiw_or_sbiw = 1;
-		//12'b1001_11??_????: is_mulu = 1; // need to infer multiply
-		11'b1001_10?_????: is_sbis_or_sbic = 1;
-		11'b1011_0??_????: is_in = 1;
-		11'b1011_1??_????: is_out = 1;
-		11'b1100_???_????: is_rjmp = 1;
-		11'b1101_???_????: is_rcall = 1;
-		11'b1110_???_????: is_ldi = 1; // also SER, with all 1
-		11'b1111_0??_????: is_brbc_or_brbs = 1;
-		11'b1111_11?_0???: is_sbrc_or_sbrs = 1;
-		endcase
-	end
+	wire [5:0] instr;
+	risc8_instruction decoder(
+		.opcode(opcode),
+		.instr(instr)
+	);
 
 	/*******************************/
 	reg do_sp_push;
@@ -352,6 +270,7 @@ module risc8_core(
 			next_PC = reg_PC + 1;
 
 		// most instructions are single cycle, no writes, no reads
+		is_invalid = 0;
 		next_sreg = sreg_out;
 		next_cycle = 0;
 		next_skip = 0;
@@ -390,174 +309,147 @@ module risc8_core(
 		if (skip) begin
 			// only a few instructions are multiple
 			// bytes.  Otherwise we only skip one PC.
-			if (is_call
-			|| is_jmp
-			|| is_lds) begin
+			if (instr == `is_call
+			|| instr == `is_jmp
+			|| instr == `is_lds) begin
 				force_PC = 1;
 				next_cycle = 1;
 				next_skip = 1;
 			end
-		end else begin
+		end else
 
-		if (is_cpc) begin
+		(* full_case *)
+		case(instr)
+		`is_cpc: begin
 			// CPC Rd,Rr (no dest, only sreg)
-			// 16'b0000_01_?_?????_????: begin
 			alu_op = `OP_SUB;
 			alu_carry = 1;
 		end
-		if (is_cp) begin
+		`is_cp: begin
 			// CP Rd,Rr (no dest, only sreg)
 			alu_op = `OP_SUB;
 		end
-		if (is_sbc) begin
+		`is_sbc: begin
 			// SBC Rd,Rr
 			alu_op = `OP_SUB;
 			alu_carry = 1;
 			alu_store = 1;
 		end
-		if (is_sub) begin
+		`is_sub: begin
 			// SUB Rd,Rr
 			alu_op = `OP_SUB;
 			alu_store = 1;
 		end
-		if (is_add) begin
+		`is_add: begin
 			// ADD Rd,Rr / LSL Rd when Rd=Rr
 			alu_op = `OP_ADD;
 			alu_store = 1;
 		end
-		if (is_adc) begin
+		`is_adc: begin
 			// ADC Rd,Rr / ROL Rd when Rd=Rr
 			alu_op = `OP_ADD;
 			alu_store = 1;
 			alu_carry = 1;
 		end
-`ifdef CONFIG_MULU
-		if (is_mulu) begin
-			// MULU Rd, Rr => R1/R0
-			alu_op = `OP_MUL;
-			alu_store = 1;
-			alu_word = 1;
-			sel_Rd = 0;
-		end
-`endif
-		if (is_and) begin
+		`is_and: begin
 			// AND Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_AND;
 		end
-		if (is_eor) begin
+		`is_eor: begin
 			// EOR Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_EOR;
 		end
-		if (is_or) begin
+		`is_or: begin
 			// OR Rd,Rr
 			alu_store = 1;
 			alu_op = `OP_OR;
 		end
-		if (is_mov) begin
+		`is_mov: begin
 			// MOV Rd,Rr (no sreg updates)
 			alu_store = 1;
 			alu_op = `OP_MOVR;
 		end
-//`define merged_ops
-`ifdef merged_ops
-		if (is_subi || is_sbci || is_cpi) begin
-			// SUBI Rd, K or
-			// SBCI Rd, K or
-			// CPI Rd,K
-			alu_op = `OP_SUB;
-			sel_Ra = op_Rdi;
-			sel_Rd = op_Rdi;
-			alu_store = !is_cpi; // CPI doesn't store
-			alu_carry = is_sbci; // only SBCI uses carry
-			alu_const = 1;
-			alu_const_value = op_K;
-		end
-`else
-		if (is_subi) begin
+		`is_subi: begin
 			// SUBI Rdi, K
 			alu_op = `OP_SUB;
 			do_use_rdi = 1;
 			alu_store = 1;
 		end
-		if (is_sbci) begin
+		`is_sbci: begin
 			// SBCI Rdi, K
 			alu_op = `OP_SUB;
 			alu_store = 1;
 			alu_carry = 1;
 			do_use_rdi = 1;
 		end
-		if (is_cpi) begin
+		`is_cpi: begin
 			// CPI Rdi, K
 			alu_op = `OP_SUB;
 			do_use_rdi = 1;
 		end
-`endif
-		if (is_ori) begin
+		`is_ori: begin
 			// ORI Rd,K or SBR Rd, K
 			alu_op = `OP_OR;
 			alu_store = 1;
 			do_use_rdi = 1;
 		end
-		if (is_andi) begin
+		`is_andi: begin
 			// ANDI Rd,K or CBR Rd, K
 			alu_op = `OP_AND;
 			alu_store = 1;
 			do_use_rdi = 1;
 		end
-		if (is_com) begin
+		`is_com: begin
 			// COM Rd
 			alu_op = `OP_EOR;
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 8'hFF;
 		end
-		if (is_neg) begin
+		`is_neg: begin
 			// NEG Rd
 			// 16'b1001_010?_????_0001: begin
 			alu_op = `OP_NEG;
 			alu_store = 1;
 		end
-		if (is_swap) begin
+		`is_swap: begin
 			// SWAP Rd, no sreg updates
 			// 16'b1001_010?__????_0010: begin
 			alu_store = 1;
 			alu_op = `OP_SWAP;
 		end
-		if (is_inc) begin
+		`is_inc: begin
 			// INC Rd
-			//16'b1001_010_?????_0011: begin
 			alu_op = `OP_ADD;
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 1;
 		end
-		if (is_asr) begin
+		`is_asr: begin
 			// ASR Rd
 			alu_op = `OP_ASR;
 			alu_store = 1;
 		end
-		if (is_lsr) begin
+		`is_lsr: begin
 			// LSR Rd
 			alu_op = `OP_LSR;
 			alu_store = 1;
 		end
-		if (is_ror) begin
+		`is_ror: begin
 			// ROR Rd
-			// 16'b1001_010?_????_0111: begin
 			alu_op = `OP_ROR;
 			alu_store = 1;
 		end
-		if (is_dec) begin
+		`is_dec: begin
 			// DEC Rd
-			// 16'b1001_010?_????_1010: begin
 			alu_op = `OP_SUB;
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 1;
 		end
-		if (is_adiw_or_sbiw) begin
+		`is_adiw_or_sbiw: begin
 			// ADIW/SBIW Rp, uimm6
 			sel_Ra = op_Rp;
 			sel_Rd = op_Rp;
@@ -571,25 +463,90 @@ module risc8_core(
 			else
 				alu_op = `OP_ADW;
 		end
-		if (is_movw) begin
+		`is_movw: begin
 			// MOVW Rd,Rr Move register pair
 			sel_Ra = { opcode[3:0], 1'b0 }; // will read both bytes
 			sel_Rd = { opcode[7:4], 1'b0 }; // will write both bytes
 			alu_word = 1;
 			alu_store = 1;
 		end
-		if (is_ldi) begin
+		`is_ldi: begin
 			// LDI Rdi, K (no sreg updates)
 			alu_op = `OP_MOVR;
 			alu_store = 1;
 			do_use_rdi = 1;
 		end
-		if (is_nop) begin
-			// NOP. relax!
+		`is_clx_or_sex: begin
+			// Status register update bit
+			// 16'b1001_0100_1???_1000: CLx
+			// 16'b1001_0100_0???_1000: SEx
+			alu_op = `OP_SREG;
+			alu_carry = opcode[7];
+			alu_const = 1;
+			alu_const_value = opcode[6:4];
 		end
 
-`ifdef CONFIG_LDS
-		if (is_lds) begin
+		`is_nop: begin
+			// NOP. relax!
+		end
+`ifdef CONFIG_MULU
+		`is_mulu: begin
+			// MULU Rd, Rr => R1/R0
+			alu_op = `OP_MUL;
+			alu_store = 1;
+			alu_word = 1;
+			sel_Rd = 0;
+		end
+`endif
+
+		// OUT to IO space (no sreg update)
+		// the ones for registers are handled here,
+		// otherwise the external controller will handle it
+		// should be single cycle, except that reading
+		// the register now takes a cycle
+		`is_out: begin
+			if(cycle[0] == 0) begin
+				// wait for Rd to show up in Ra
+				next_cycle = 1;
+			end else begin
+				next_wen = 1;
+				next_wdata = reg_Ra;
+				next_addr = io_addr + 8'h20;
+
+				case(io_addr)
+				6'h3D: next_SP[ 7:0] = reg_Ra;
+				6'h3E: next_SP[15:8] = reg_Ra;
+				6'h3F: next_sreg = reg_Ra;
+				default: begin
+					// nothing to do here;
+					// the SOC handles it
+				end
+				endcase
+			end
+		end
+
+		// IN from IO space (no sreg update, should be 1 cycle)
+		// the registers ones are handled here, otherwise
+		// the external SOC will handle it.
+		`is_in: begin
+			if(cycle[0] == 0) begin
+				next_addr = io_addr + 8'h20;
+				next_ren = 1;
+				next_cycle = 1;
+			end else begin
+				alu_op = `OP_MOVR;
+				alu_store = 1;
+				alu_const = 1;
+				case(io_addr)
+				6'h3D: alu_const_value = reg_SP[ 7:0];
+				6'h3E: alu_const_value = reg_SP[15:8];
+				6'h3F: alu_const_value = sreg;
+				default: alu_const_value = data_read; // from the SOC
+				endcase
+			end
+		end
+
+		`is_lds: begin
 			// LDS rdi,i  / STS i,rdi
 			// No sreg update
 			// 2 cycles
@@ -613,8 +570,7 @@ module risc8_core(
 			2'b10: do_data_load = 1;
 			endcase
 		end
-`endif
-		if (is_ld_xyz) begin
+		`is_ld_xyz: begin
 			case(opcode[3:2])
 			2'b00: sel_Ra = BASE_Z;
 			2'b10: sel_Ra = BASE_Y;
@@ -663,7 +619,7 @@ module risc8_core(
 			end
 			endcase
 		end
-		if (is_ld_yz_plus_q) begin
+		`is_ld_yz_plus_q: begin
 			// ST / LD Rd, Y/Z+Q (no status update)
 			// Z+Q: 16'b10?0_????_????_0???:
 			// Y+Q: 16'b10?0_????_????_1???:
@@ -686,7 +642,7 @@ module risc8_core(
 			2'b10: do_data_load = 1;
 			endcase
 		end
-		if (is_lpm) begin
+		`is_lpm: begin
 			// LPM/ELPM Rd, Z / Z+
 			sel_Ra = BASE_Z;
 			sel_Rd = sel_Ra;
@@ -752,7 +708,7 @@ module risc8_core(
 			invalid_op = 1;
 		end
 */
-		if (is_push) begin
+		`is_push: begin
 			// PUSH Rd
 			next_wdata = reg_Ra[7:0];
 
@@ -764,7 +720,7 @@ module risc8_core(
 				do_sp_push = 1;
 		end
 
-		if (is_pop) begin
+		`is_pop: begin
 			// POP Rd
 			// start the read and load the data into Rd
 			// once it is ready
@@ -774,17 +730,7 @@ module risc8_core(
 				do_data_load = 1;
 		end
 
-		if (is_clx_or_sex) begin
-			// Status register update bit
-			// 16'b1001_0100_1???_1000: CLx
-			// 16'b1001_0100_0???_1000: SEx
-			alu_op = `OP_SREG;
-			alu_carry = opcode[7];
-			alu_const = 1;
-			alu_const_value = opcode[6:4];
-		end
-
-		if (is_ret) begin
+		`is_ret: begin
 			// RET
 			case(cycle)
 			2'b00: begin
@@ -803,7 +749,7 @@ module risc8_core(
 		end
 
 		// CPSE Rd,Rr (no sreg updates)
-		if(is_cpse) begin
+		`is_cpse: begin
 			// wait for Rd and Rr to be available
 			if (cycle[0] == 0)
 				next_cycle = 1;
@@ -813,7 +759,7 @@ module risc8_core(
 		end
 
 		// SBRC/SBRS skip if register bit b equals B
-		if (is_sbrc_or_sbrs) begin
+		`is_sbrc_or_sbrs: begin
 			// 16'b1111_110?_????_0???, // SBRC
 			// 16'b1111_111?_????_0???: // SBRS
 			if(cycle[0] == 0)
@@ -827,14 +773,14 @@ module risc8_core(
 		// this happens while the ALU is still computing the
 		// previous instruction, so use the next SREG value,
 		// not the current register.
-		if (is_brbc_or_brbs) begin
+		`is_brbc_or_brbs: begin
 			// 16'b1111_00??_????_????, // BRBS
 			// 16'b1111_01??_????_????: // BRBC
 			if (next_sreg[op_bit_select] != op_bit_set)
 				next_PC = reg_PC + simm7 + 1;
 		end
 
-		if (is_jmp) begin
+		`is_jmp: begin
 			// JMP abs22, 3 cycles
 			// 16'b1001_010?_????_110?:
 			// 16 bits in next word
@@ -856,7 +802,7 @@ module risc8_core(
 			endcase
 		end
 
-		if (is_call) begin
+		`is_call: begin
 			// CALL abs22
 			// 16'b1001_010?_????_111?:
 			// 16 bits in next word
@@ -887,7 +833,7 @@ module risc8_core(
 			endcase
 		end
 
-		if (is_ijmp) begin
+		`is_ijmp: begin
 			// IJMP Z - Indirect jump/call to Z or EIND:Z
 			// 16'b1001_010?_000?_1001:
 			// 2 cycles
@@ -898,14 +844,14 @@ module risc8_core(
 				next_PC = reg_Ra;
 		end
 
-		if (is_rjmp) begin
+		`is_rjmp: begin
 			// RJMP to PC + simm12
 			// 16'b1100_????????????:
 			// 2 cycles
 			next_PC = reg_PC + simm12 + 1;
 		end
 
-		if (is_rcall) begin
+		`is_rcall: begin
 			// RCALL to PC + simm12
 			// 16'b1101_????????????:
 			// 3 cycles
@@ -930,57 +876,8 @@ module risc8_core(
 			endcase
 		end
 
-		// OUT to IO space (no sreg update)
-		// the ones for registers are handled here,
-		// otherwise the external controller will handle it
-		// should be single cycle, except that reading
-		// the register now takes a cycle
-		if (is_out) begin
-			// 16'b1011_1???_????_????: begin
-			if(cycle[0] == 0) begin
-				// wait for Rd to show up in Ra
-				next_cycle = 1;
-			end else begin
-				next_wen = 1;
-				next_wdata = reg_Ra;
-				next_addr = io_addr + 8'h20;
-
-				case(io_addr)
-				6'h3D: next_SP[ 7:0] = reg_Ra;
-				6'h3E: next_SP[15:8] = reg_Ra;
-				6'h3F: next_sreg = reg_Ra;
-				default: begin
-					// nothing to do here;
-					// the SOC handles it
-				end
-				endcase
-			end
-		end
-
-		// IN from IO space (no sreg update, should be 1 cycle)
-		// the registers ones are handled here, otherwise
-		// the external SOC will handle it.
-		if (is_in) begin
-			// 16'b1011_0???_????_????: begin
-			if(cycle[0] == 0) begin
-				next_addr = io_addr + 8'h20;
-				next_ren = 1;
-				next_cycle = 1;
-			end else begin
-				alu_op = `OP_MOVR;
-				alu_store = 1;
-				alu_const = 1;
-				case(io_addr)
-				6'h3D: alu_const_value = reg_SP[ 7:0];
-				6'h3E: alu_const_value = reg_SP[15:8];
-				6'h3F: alu_const_value = sreg;
-				default: alu_const_value = data_read; // from the SOC
-				endcase
-			end
-		end
-
 		// Skip if bit in IO space is set or clear.
-		if (is_sbis_or_sbic) begin
+		`is_sbis_or_sbic: begin
 			if (cycle[0] == 0) begin
 				next_addr = opcode[7:3] + 8'h20;
 				next_ren = 1;
@@ -989,6 +886,11 @@ module risc8_core(
 			if (data_read[op_bit_select] == op_bit_set)
 				next_skip = 1;
 		end
+
+		default: begin
+			is_invalid = 1;
+		end
+		endcase
 
 
 		/*
@@ -1053,8 +955,6 @@ module risc8_core(
 			alu_const = 1;
 			alu_const_value = data_read;
 		end
-
-	end // skip
 	end
 endmodule
 

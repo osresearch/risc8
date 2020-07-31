@@ -26,8 +26,15 @@
 `define OP_SREG	4'hE // Update the SREG flags, uses carry input for set/clear
 `define OP_MUL  4'hF // optional
 
-// If you don't use SREG half-carry flag, turn it off to save a few LC
-`define SREG_H
+// If not every status register bit is required,
+// they can be toggled off here.
+`undef SREG_SI
+`undef SREG_ST
+`undef SREG_SH
+`define SREG_SS
+`define SREG_SV
+`define SREG_SN
+`define SREG_SC
 
 module risc8_alu(
 	input clk,
@@ -49,7 +56,43 @@ module risc8_alu(
 	wire [7:0] Rr = Rr_in;
 	wire [7:0] Rd = Rd_in[7:0]; // default is operate on only the bottom byte
 	reg SI, ST, SH, SS, SV, SN, SZ, SC;
-	assign sreg_out = { SI, ST, SH, SS, SV, SN, SZ, SC };
+	assign sreg_out = {
+`ifdef SREG_SI
+		SI,
+`else
+		1'b0,
+`endif
+`ifdef SREG_ST
+		ST,
+`else
+		1'b0,
+`endif
+`ifdef SREG_SH
+		SH,
+`else
+		1'b0,
+`endif
+`ifdef SREG_SS
+		SS,
+`else
+		1'b0,
+`endif
+`ifdef SREG_SV
+		SV,
+`else
+		1'b0,
+`endif
+`ifdef SREG_SN
+		SN,
+`else
+		1'b0,
+`endif
+`ifdef SREG_SC
+		SC
+`else
+		1'b0
+`endif
+	};
 
 	// helpers for computing sreg updates
 	wire Rd3 = Rd[3];
@@ -63,94 +106,109 @@ module risc8_alu(
 	wire C = sreg_in[0];
 	wire opt_C = use_carry ? C : 0; // Optional Carry
 	wire R_zero = R == 0;
-	reg sreg_default_snz;
 
 	always @(*) begin
 		{Rh, R} = Rd_in;
 		{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg_in;
-		sreg_default_snz = 1;
 
 		(* fullcase *)
 		case(op)
 		`OP_MOVE: begin
 			// Default will copy {R,Rh} <= Rd
 			// Do not modify any SREG
-			sreg_default_snz = 0;
 		end
 		`OP_MOVR: begin
 			// Copy the Rb input byte to the output
 			// Do not modify any SREG
 			Rh = 0;
 			R = Rr;
-			sreg_default_snz = 0;
 		end
 		`OP_ADD: begin
 			R = Rd + Rr + opt_C;
-`ifdef SREG_H
 			SH = (Rd3 & Rr3) | (Rr3 & !R3) | (!R3 & Rd3);
-`endif
 			SV = (Rd7 & Rr7 & !R7) | (!Rd7 & !Rr7 & R7);
 			SC = (Rd7 & R7) | (Rr7 & !R7) | (!R7 & Rd7);
+
+			SN = R7;
+			SS = SN^SV;
+			SZ = R_zero;
 		end
 		`OP_SUB: begin
 			R = Rd - Rr - opt_C;
-`ifdef SREG_H
 			SH = (!Rd3 & Rr3) | (Rr3 & R3) | (R3 & !Rd3);
-`endif
 			SV = (Rd7 & !Rr7 & !R7) | (!Rd7 & Rr7 & R7);
 			SC = (!Rd7 & Rr7) | (Rr7 & R7) | (R7 & !Rd7);
+
+			SN = R7;
+			SS = SN^SV;
+			SZ = R_zero;
 		end
 		`OP_ADW, `OP_SBW: begin
 			if (op[0]) begin
 				// SBW
 				{Rh,R} = Rd_in - Rr;
-				SC = Rd7 & Rr7 | Rr7 & !R7 | Rd7 & !R7;
+				SC = R15 & !Rdh7;
 			end else begin
 				// ADW
 				{Rh,R} = Rd_in + Rr;
-				SC = R15 & !Rdh7;
+				SC = !R15 & Rdh7;
 			end
-			SS = SN ^ SV;
-			SV = !Rdh7 & R15;
+			SV = R15 & !Rdh7;
 			SN = R15;
+			SS = SN ^ SV;
 			SZ = { Rh, R } == 0;
-			sreg_default_snz = 0;
 		end
 		`OP_NEG: begin
 			R = ~Rd;
-`ifdef SREG_H
 			SH = R3 | !Rd3;
-`endif
 			SV = R == 8'h80;
 			SC = R != 0;
+			SN = R7;
+			SS = SN^SV;
+			SZ = R_zero;
 		end
 		`OP_SWAP: begin
 			R = { Rd[3:0], Rd[7:4] };
 			// no sreg update
-			sreg_default_snz = 0;
 		end
 		`OP_ASR, `OP_ROR: begin
 			R = { op[0] ? C : Rd[7], Rd[7:1] };
-			SS = SN^SV;
 			SC = Rd[0];
+			SN = R7;
+			SV = SN^SC;
+			SS = SN^SV;
+			SZ = R_zero;
 		end
 		`OP_LSR: begin
 			R = { 1'b0, Rd[7:1] };
-			SS = SN^SV;
 			SC = Rd[0];
-			// SN = 0; // this breaks negative flag
+			SN = 0;
+			SZ = R_zero;
+			SV = SN^SC;
+			SS = SN^SV;
 		end
 		`OP_AND: begin
 			R = Rd & Rr;
 			SV = 0;
+			SN = R7;
+			SS = SN^SV;
+			SZ = R_zero;
 		end
 		`OP_EOR: begin
 			R = Rd ^ Rr;
 			SV = 0;
+			SN = R7;
+			SV = SN^SC;
+			SS = SN^SV;
+			SZ = R_zero;
 		end
 		`OP_OR: begin
 			R = Rd | Rr;
 			SV = 0;
+			SN = R7;
+			SV = SN^SC;
+			SS = SN^SV;
+			SZ = R_zero;
 		end
 		`OP_SREG: begin
 			(* full_case *)
@@ -164,7 +222,6 @@ module risc8_alu(
 			3'b110: ST = use_carry;
 			3'b111: SI = use_carry;
 			endcase
-			sreg_default_snz = 0;
 		end
 		// need to infer a multiplier
 		`OP_MUL: begin
@@ -175,13 +232,6 @@ module risc8_alu(
 `endif
 		end
 		endcase
-
-		// many operations reuse this calculation
-		if (sreg_default_snz) begin
-			SS = SN^SV;
-			SN = R7;
-			SZ = R_zero;
-		end
 	end
 
 endmodule

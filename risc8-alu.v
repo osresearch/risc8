@@ -28,13 +28,32 @@
 
 // If not every status register bit is required,
 // they can be toggled off here.
-`undef SREG_SI
-`undef SREG_ST
-`undef SREG_SH
-`define SREG_SS
-`define SREG_SV
-`define SREG_SN
-`define SREG_SC
+//`define CONFIG_SREG_SI
+//`define CONFIG_SREG_ST
+//`define CONFIG_SREG_SH
+`define CONFIG_SREG_SS
+`define CONFIG_SREG_SV
+`define CONFIG_SREG_SN
+`define CONFIG_SREG_SZ
+`define CONFIG_SREG_SC
+
+// And if some ALU operations are not required
+// they can also be turned off.
+
+`define CONFIG_OP_ADD
+`define CONFIG_OP_SUB
+`define CONFIG_OP_ADW_OR_SBW
+`define CONFIG_OP_SBW
+`define CONFIG_OP_NEG
+`define CONFIG_OP_SWAP
+`define CONFIG_OP_ASR_OR_ROR
+`define CONFIG_OP_LSR
+`define CONFIG_OP_AND
+`define CONFIG_OP_EOR
+`define CONFIG_OP_OR
+`define CONFIG_OP_SREG
+//`define CONFIG_OP_MUL
+
 
 module risc8_alu(
 	input clk,
@@ -57,37 +76,42 @@ module risc8_alu(
 	wire [7:0] Rd = Rd_in[7:0]; // default is operate on only the bottom byte
 	reg SI, ST, SH, SS, SV, SN, SZ, SC;
 	assign sreg_out = {
-`ifdef SREG_SI
+`ifdef CONFIG_SREG_SI
 		SI,
 `else
 		1'b0,
 `endif
-`ifdef SREG_ST
+`ifdef CONFIG_SREG_ST
 		ST,
 `else
 		1'b0,
 `endif
-`ifdef SREG_SH
+`ifdef CONFIG_SREG_SH
 		SH,
 `else
 		1'b0,
 `endif
-`ifdef SREG_SS
+`ifdef CONFIG_SREG_SS
 		SS,
 `else
 		1'b0,
 `endif
-`ifdef SREG_SV
+`ifdef CONFIG_SREG_SV
 		SV,
 `else
 		1'b0,
 `endif
-`ifdef SREG_SN
+`ifdef CONFIG_SREG_SN
 		SN,
 `else
 		1'b0,
 `endif
-`ifdef SREG_SC
+`ifdef CONFIG_SREG_SZ
+		SZ,
+`else
+		1'b0,
+`endif
+`ifdef CONFIG_SREG_SC
 		SC
 `else
 		1'b0
@@ -123,6 +147,7 @@ module risc8_alu(
 			Rh = 0;
 			R = Rr;
 		end
+`ifdef CONFIG_OP_ADD
 		`OP_ADD: begin
 			R = Rd + Rr + opt_C;
 			SH = (Rd3 & Rr3) | (Rr3 & !R3) | (!R3 & Rd3);
@@ -133,6 +158,8 @@ module risc8_alu(
 			SS = SN^SV;
 			SZ = R_zero;
 		end
+`endif
+`ifdef CONFIG_OP_SUB
 		`OP_SUB: begin
 			R = Rd - Rr - opt_C;
 			SH = (!Rd3 & Rr3) | (Rr3 & R3) | (R3 & !Rd3);
@@ -143,6 +170,8 @@ module risc8_alu(
 			SS = SN^SV;
 			SZ = R_zero;
 		end
+`endif
+`ifdef CONFIG_OP_ADW_OR_SBW
 		`OP_ADW, `OP_SBW: begin
 			if (op[0]) begin
 				// SBW
@@ -158,6 +187,8 @@ module risc8_alu(
 			SS = SN ^ SV;
 			SZ = { Rh, R } == 0;
 		end
+`endif
+`ifdef CONFIG_OP_NEG
 		`OP_NEG: begin
 			R = ~Rd;
 			SH = R3 | !Rd3;
@@ -167,10 +198,14 @@ module risc8_alu(
 			SS = SN^SV;
 			SZ = R_zero;
 		end
+`endif
+`ifdef CONFIG_OP_SWAP
 		`OP_SWAP: begin
 			R = { Rd[3:0], Rd[7:4] };
 			// no sreg update
 		end
+`endif
+`ifdef CONFIG_OP_ASR_OR_ROR
 		`OP_ASR, `OP_ROR: begin
 			R = { op[0] ? C : Rd[7], Rd[7:1] };
 			SC = Rd[0];
@@ -179,6 +214,8 @@ module risc8_alu(
 			SS = SN^SV;
 			SZ = R_zero;
 		end
+`endif
+`ifdef CONFIG_OP_LSR
 		`OP_LSR: begin
 			R = { 1'b0, Rd[7:1] };
 			SC = Rd[0];
@@ -187,6 +224,8 @@ module risc8_alu(
 			SV = SN^SC;
 			SS = SN^SV;
 		end
+`endif
+`ifdef CONFIG_OP_AND
 		`OP_AND: begin
 			R = Rd & Rr;
 			SV = 0;
@@ -194,6 +233,8 @@ module risc8_alu(
 			SS = SN^SV;
 			SZ = R_zero;
 		end
+`endif
+`ifdef CONFIG_OP_EOR
 		`OP_EOR: begin
 			R = Rd ^ Rr;
 			SV = 0;
@@ -202,6 +243,8 @@ module risc8_alu(
 			SS = SN^SV;
 			SZ = R_zero;
 		end
+`endif
+`ifdef CONFIG_OP_OR
 		`OP_OR: begin
 			R = Rd | Rr;
 			SV = 0;
@@ -210,6 +253,8 @@ module risc8_alu(
 			SS = SN^SV;
 			SZ = R_zero;
 		end
+`endif
+`ifdef CONFIG_OP_SREG
 		`OP_SREG: begin
 			(* full_case *)
 			case(Rr[3:0])
@@ -223,13 +268,17 @@ module risc8_alu(
 			3'b111: SI = use_carry;
 			endcase
 		end
+`endif
+`ifdef CONFIG_OP_MULU
 		// need to infer a multiplier
 		`OP_MUL: begin
-`ifdef CONFIG_MULU
 			{ Rh, R } = Rd * Rr;
 			SC = R15;
 			SZ = { Rh, R } == 0;
+		end
 `endif
+		default: begin
+			// NOTHING
 		end
 		endcase
 	end

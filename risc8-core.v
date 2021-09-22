@@ -629,6 +629,9 @@ module risc8_core(
 				alu_const_value = reg_Ra[0] ? cdata[15:8] : cdata[7:0];
 				sel_Rd = op_Rd;
 
+				// Exception for simple LPM
+				if(opcode == 16'b1001_0101_1100_1000) sel_Rd = 0;
+
 				// restore the PC, and do one more cycle
 				// so that the next_PC will prefetch the
 				// correct next instruction

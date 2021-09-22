@@ -163,6 +163,7 @@ module risc8_core(
 	wire [5:0] io_addr = { opcode[10:9], opcode[3:0] };
 	wire [2:0] op_bit_select = opcode[2:0];
 	wire op_bit_set = opcode[9];
+	wire op_brbx_bit_set = opcode[10];
 
 	// LD vs ST is in the 9th bit
 	wire op_is_store = opcode[9];
@@ -752,7 +753,7 @@ module risc8_core(
 		`is_brbc_or_brbs: begin
 			// 16'b1111_00??_????_????, // BRBS
 			// 16'b1111_01??_????_????: // BRBC
-			if (next_sreg[op_bit_select] != op_bit_set)
+			if (next_sreg[op_bit_select] != op_brbx_bit_set)
 				next_PC = reg_PC + simm7 + 1;
 		end
 `endif

@@ -110,7 +110,7 @@ module risc8_instruction(
 		11'b1001_000_010?: instr = `is_lpm; // Z
 		11'b1000_00?_0000: instr = `is_ld_xyz; // z
 		11'b1000_00?_1000: instr = `is_ld_xyz; // Y
-		11'b1000_00?_1100: instr = `is_ld_xyz; // X
+		11'b1001_00?_1100: instr = `is_ld_xyz; // X
 		11'b1001_00?_0001: instr = `is_ld_xyz; // Z+
 		11'b1001_00?_0010: instr = `is_ld_xyz; // -Z
 		11'b1001_00?_1001: instr = `is_ld_xyz; // Y+

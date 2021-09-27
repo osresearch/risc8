@@ -152,7 +152,7 @@ module risc8_alu(
 			R = Rd + Rr + opt_C;
 			SH = (Rd3 & Rr3) | (Rr3 & !R3) | (!R3 & Rd3);
 			SV = (Rd7 & Rr7 & !R7) | (!Rd7 & !Rr7 & R7);
-			SC = (Rd7 & R7) | (Rr7 & !R7) | (!R7 & Rd7);
+			SC = (Rd7 & Rr7) | (Rr7 & !R7) | (!R7 & Rd7);
 
 			SN = R7;
 			SS = SN^SV;

@@ -422,7 +422,7 @@ module risc8_core(
 			// 16'b1001_0100_1???_1000: CLx
 			// 16'b1001_0100_0???_1000: SEx
 			alu_op = `OP_SREG;
-			alu_carry = opcode[7];
+			alu_carry = !opcode[7];
 			alu_const = 1;
 			alu_const_value = opcode[6:4];
 		end

@@ -64,6 +64,7 @@ module risc8_alu(
 	input [7:0] sreg_in, // carry in
 	input [3:0] op,
 	input use_carry,
+	input keep_sreg,
 
 	output [15:0] R_out, // full word output register
 	output [7:0] sreg_out
@@ -281,6 +282,10 @@ module risc8_alu(
 			// NOTHING
 		end
 		endcase
+
+		if(keep_sreg) begin
+			{ SI, ST, SH, SS, SV, SN, SZ, SC } = sreg_in;
+		end
 	end
 
 endmodule

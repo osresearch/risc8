@@ -567,7 +567,7 @@ module risc8_core(
 		end
 `endif
 
-`ifdef config_ld_yz_plus_q
+`ifdef config_is_ld_yz_plus_q
 		`is_ld_yz_plus_q: begin
 			// ST / LD Rd, Y/Z+Q (no status update)
 			// Z+Q: 16'b10?0_????_????_0???:

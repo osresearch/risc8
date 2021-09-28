@@ -88,7 +88,6 @@ module risc8_instruction(
 		alu_rdi = 0;
 
 		casez({opcode[15:9],opcode[3:0]})
-		11'b0000_000_0000: if (opcode[8] == 1'b0) begin end // NOP
 		11'b0000_000_????: if (opcode[8] == 1'b1) instr = `is_movw;
 		11'b0000_01?_????: `ALU_OP(`OP_SUB, 0, 1) // CPC Rd,Rr
 		11'b0000_10?_????: `ALU_OP(`OP_SUB, 1, 1) // SBC Rd, Rr

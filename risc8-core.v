@@ -144,13 +144,13 @@ module risc8_core(
 	reg alu_store;
 	reg alu_word;
 	reg alu_carry;
-	reg alu_keep_sreg;
+	reg [7:0] alu_keep_sreg;
 
 	// delayed by one cycle for the register file to finish loading
 	reg prev_alu_store;
 	reg prev_alu_word;
 	reg prev_alu_carry;
-	reg prev_alu_keep_sreg;
+	reg [7:0] prev_alu_keep_sreg;
 	reg [5:0] prev_sel_Rd;
 
 	// opcode registers
@@ -377,6 +377,7 @@ module risc8_core(
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 1;
+			alu_keep_sreg = 8'b1110_0001; // ITH____C
 		end
 `endif
 `ifdef config_is_dec
@@ -386,6 +387,7 @@ module risc8_core(
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 1;
+			alu_keep_sreg = 8'b1110_0001; // ITH____C
 		end
 `endif
 `ifdef config_is_com
@@ -543,7 +545,7 @@ module risc8_core(
 				alu_word = 1;
 				alu_const = 1;
 				alu_const_value = 1;
-				alu_keep_sreg = 1;
+				alu_keep_sreg = 8'b1111_1111;
 
 				case(opcode[1:0])
 				2'b01: begin
@@ -591,7 +593,7 @@ module risc8_core(
 				alu_op = `OP_ADW;
 				alu_const = 1;
 				alu_const_value = op_Q;
-				alu_keep_sreg = 1;
+				alu_keep_sreg = 8'b1111_1111;
 				
 				next_cycle = 1;
 			end
@@ -619,7 +621,7 @@ module risc8_core(
 				alu_word = 1;
 				alu_const = 1;
 				alu_const_value = opcode[0];
-				alu_keep_sreg = 1;
+				alu_keep_sreg = 8'b1111_1111;
 
 				// start a read of the program memory space
 				// storing the real next PC into the temp reg

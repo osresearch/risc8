@@ -195,8 +195,8 @@ module risc8_alu(
 `endif
 `ifdef CONFIG_OP_NEG
 		`OP_NEG: begin
-			R = ~Rd;
-			SH = R3 | !Rd3;
+			R = -Rd;
+			SH = R3 | Rd3;
 			SV = R == 8'h80;
 			SC = R != 0;
 			SN = R7;

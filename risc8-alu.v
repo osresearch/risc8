@@ -178,12 +178,13 @@ module risc8_alu(
 				// SBW
 				{Rh,R} = Rd_in - Rr;
 				SC = R15 & !Rdh7;
+				SV = !R15 & Rdh7;
 			end else begin
 				// ADW
 				{Rh,R} = Rd_in + Rr;
 				SC = !R15 & Rdh7;
+				SV = R15 & !Rdh7;
 			end
-			SV = R15 & !Rdh7;
 			SN = R15;
 			SS = SN ^ SV;
 			SZ = { Rh, R } == 0;

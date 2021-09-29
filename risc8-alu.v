@@ -169,7 +169,10 @@ module risc8_alu(
 
 			SN = R7;
 			SS = SN^SV;
-			SZ = R_zero;
+
+			// SBC clears flag when result is non-zero, and keeps previous value otherwise
+			if(!use_carry || !R_zero)
+				SZ = R_zero;
 		end
 `endif
 `ifdef CONFIG_OP_ADW_OR_SBW

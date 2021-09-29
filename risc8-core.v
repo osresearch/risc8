@@ -707,9 +707,10 @@ module risc8_core(
 			// POP Rd
 			// start the read and load the data into Rd
 			// once it is ready on the next cycle
-			if(cycle[0] == 0)
+			if(cycle[0] == 0) begin
 				do_sp_pop = 1;
-			else
+				next_cycle = 1;
+			end else
 				do_data_load = 1;
 		end
 `endif

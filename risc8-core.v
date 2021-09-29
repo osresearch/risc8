@@ -395,6 +395,7 @@ module risc8_core(
 			alu_store = 1;
 			alu_const = 1;
 			alu_const_value = 8'hFF;
+			alu_carry = 1;
 		end
 `endif
 `ifdef config_is_adiw_or_sbiw

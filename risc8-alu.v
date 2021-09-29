@@ -240,7 +240,6 @@ module risc8_alu(
 			R = Rd ^ Rr;
 			SV = 0;
 			SN = R7;
-			SV = SN^SC;
 			SS = SN^SV;
 			SZ = R_zero;
 		end

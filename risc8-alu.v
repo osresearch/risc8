@@ -238,9 +238,9 @@ module risc8_alu(
 `ifdef CONFIG_OP_EOR
 		`OP_EOR: begin
 			R = Rd ^ Rr;
+			if(use_carry) SC = 1; // For COM instruction
 			SV = 0;
 			SN = R7;
-			SV = SN^SC;
 			SS = SN^SV;
 			SZ = R_zero;
 		end

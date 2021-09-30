@@ -260,17 +260,28 @@ module risc8_alu(
 `endif
 `ifdef CONFIG_OP_SREG
 		`OP_SREG: begin
-			(* full_case *)
-			case(Rr[3:0])
-			3'b000: SC = use_carry;
-			3'b001: SZ = use_carry;
-			3'b010: SN = use_carry;
-			3'b011: SV = use_carry;
-			3'b100: SS = use_carry;
-			3'b101: SH = use_carry;
-			3'b110: ST = use_carry;
-			3'b111: SI = use_carry;
-			endcase
+			if(Rr[3] == 0) begin
+				// CLX or SEX
+				(* full_case *)
+				case(Rr[2:0])
+				3'b000: SC = use_carry;
+				3'b001: SZ = use_carry;
+				3'b010: SN = use_carry;
+				3'b011: SV = use_carry;
+				3'b100: SS = use_carry;
+				3'b101: SH = use_carry;
+				3'b110: ST = use_carry;
+				3'b111: SI = use_carry;
+				endcase
+			end else
+			begin
+				if(use_carry)
+					// BST
+					ST = Rd[Rr[2:0]];
+				else
+					// BLD
+					R[Rr[2:0]] = ST;
+			end
 		end
 `endif
 `ifdef CONFIG_OP_MULU

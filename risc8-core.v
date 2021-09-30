@@ -44,6 +44,7 @@
 `define config_is_cpse
 `define config_is_sbrc_or_sbrs
 `define config_is_brbc_or_brbs
+`define config_is_bld_or_bst
 //`define config_is_jmp
 //`define config_is_call
 //`define config_is_ijmp
@@ -771,6 +772,21 @@ module risc8_core(
 			if (next_sreg[op_bit_select] != op_brbx_bit_set)
 				next_PC = reg_PC + simm7 + 1;
 		end
+`endif
+
+`ifdef config_is_bld_or_bst
+	// BLD - Bit Load from the T Bit in SREG to a Bit in Register
+	// BST - Bit Store from Bit in Register to T Bit in SREG
+	// 16'b1111_100?_????_0??? // BLD
+	// 16'b1111_101?_????_0??? // BST
+	//            ^ Bit 9 (BLD / BST)
+	`is_bld_or_bst: begin
+		alu_op = `OP_SREG;
+		alu_const = 1;
+		alu_const_value = {1'b1, opcode[2:0]};
+		alu_carry =  opcode[9];
+		alu_store = !opcode[9];
+	end
 `endif
 
 `ifdef config_is_jmp

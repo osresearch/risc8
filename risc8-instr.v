@@ -41,6 +41,7 @@
 `define is_rjmp		5'h17
 `define is_rcall	5'h18
 `define is_sbis_or_sbic	5'h19
+`define is_bld_or_bst	5'h1a
 
 module risc8_instruction(
 	input [15:0] opcode,
@@ -147,6 +148,7 @@ module risc8_instruction(
 		11'b1101_???_????: instr = `is_rcall;
 		11'b1110_???_????: `ALU_OP_RDI(`OP_MOVR, 1, 0) // LDI Rdi, K also SER, with all 1
 		11'b1111_0??_????: instr = `is_brbc_or_brbs;
+		11'b1111_10?_0???: instr = `is_bld_or_bst;
 		11'b1111_11?_0???: instr = `is_sbrc_or_sbrs;
 		endcase
 	end
